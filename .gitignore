@@ -1,0 +1,16 @@
+# Rust build output
+/target/
+
+# Local tooling state
+/.codegraph
+/.omo/
+
+# Editor and OS files
+.DS_Store
+*.swp
+*.swo
+
+# Environment and logs
+.env
+.env.*
+*.log
