@@ -36,12 +36,15 @@ Teams that use multiple coding agents need one place to see which agent is activ
 - `reconciliation`: a pass that corrects local state from authoritative sources after events arrive.
 - `adaptive preview polling`: preview refresh cadence that changes based on agent state and activity.
 
-## Foundation Scope
-The current implementation is only:
+## Shipped Scope
+The current implementation is:
 - CLI startup.
-- An interactive empty-state TUI shell.
+- `dashboard`: an interactive empty-state TUI shell.
+- `inspect`: a one-shot tmux-derived tracer that runs discovery once and prints normalized state.
+- Strict read-only `tmux list-panes` parsing into typed pane and process evidence.
+- Deterministic fallback agent rows for live shell, live command, stale, dead, missing, and empty snapshots.
 
-Everything below is **Planned — not implemented yet**.
+Everything below remains **Planned — not implemented yet**.
 
 ## Planned — not implemented yet
 
@@ -55,13 +58,13 @@ Everything below is **Planned — not implemented yet**.
 - Configured custom agents
 
 ### Agent States
-- Idle
-- Working
-- Waiting on permission
-- Waiting on plan approval
-- Waiting on a question reply
-- Unknown
-- Exited
+- `idle`: shipped for live shell fallback evidence.
+- `working`: shipped for live non-shell fallback evidence.
+- `unknown`: shipped for stale or incomplete fallback evidence.
+- `exited`: shipped for dead or missing pane fallback evidence.
+- `waiting_permission`: planned for authoritative hook/log evidence.
+- `waiting_plan_approval`: planned for authoritative hook/log evidence.
+- `waiting_question`: planned for authoritative hook/log evidence.
 
 ### Dashboard Capabilities
 - Main dashboard with agent rows and repository context.
@@ -78,6 +81,13 @@ Everything below is **Planned — not implemented yet**.
 - Event-first semantic updates.
 - Reconciliation after event delivery.
 - Adaptive preview polling tied to current activity.
+
+### Discovery Beyond One-Shot Inspect
+- Long-running daemon loop.
+- Polling or evented reconciliation.
+- Process-tree discovery beyond the current tmux current-command fallback.
+- Hooks, markers, structured logs, and terminal-content adapters.
+- HTTP/SSE transport for live UI rows.
 
 ### Security
 - Keep secrets out of the visible dashboard surface.
@@ -103,7 +113,10 @@ Everything below is **Planned — not implemented yet**.
 
 ## Measurable Acceptance
 - The foundation starts as a CLI and opens the interactive empty-state TUI.
-- The spec clearly separates current foundation scope from planned capabilities.
+- `agentmux inspect` runs one tmux discovery pass and prints deterministic normalized output.
+- Empty inspect snapshots explain that no agents were discovered from tmux panes.
+- tmux discovery failures exit nonzero without partial inspect stdout.
+- The spec clearly separates shipped scope from planned capabilities.
 - Every later capability in this document is labeled `Planned — not implemented yet`.
 - The document includes problem, users, goals, non-goals, and terms.
 - The document names Claude Code, Codex, Cursor, OpenCode, Pi, Gemini CLI, and custom agents.

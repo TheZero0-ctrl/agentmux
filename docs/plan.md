@@ -12,10 +12,15 @@ This plan is derived from the approved spec and architecture docs. The foundatio
 
 ## Phase 2: tmux/process discovery + state
 
+- Status: the first tracer is implemented with typed fallback state, strict `tmux list-panes`
+  parsing, conservative command classification, in-memory missing/stale handling, and a shipped
+  one-shot `agentmux inspect` command. Broader process-tree discovery, polling, live UI rows, and
+  integration into a long-running daemon remain future work.
 - Depends on: foundation shell, daemon boundary, and a state model that can represent live processes and panes.
 - Entry criteria: the project can observe tmux panes and related process evidence without UI code reaching into tmux directly.
-- Exit criteria: tmux/process discovery feeds a structured state model for agents, panes, and activity.
-- Tests: unit tests for pane/process discovery, fixtures for state translation, regression tests for stale or missing panes.
+- Exit criteria: tmux current-command discovery feeds a structured state model and `agentmux inspect`
+  exposes one deterministic one-shot snapshot.
+- Tests: unit tests for pane/process discovery, fixtures for state translation, regression tests for stale or missing panes, inspect seam tests, and CLI inspect failure tests.
 - Risks: tmux attachment edge cases, permission issues, and noisy process trees causing false state changes.
 
 ## Phase 3: hooks/log adapters

@@ -2,19 +2,23 @@
 
 ## Scope
 
-The current foundation is only the CLI entrypoint and an empty-state Ratatui shell.
+The current implementation includes the CLI entrypoint, an empty-state Ratatui shell, and the
+first Phase 2 discovery tracer: typed in-memory state, strict tmux pane collection, conservative
+process classification, a daemon-owned in-process discovery facade, and one-shot `agentmux inspect`
+output.
 
-Everything below is future architecture and is not implemented yet.
+The transport, adapters, reconciliation loop, persistence, and richer dashboard surfaces below
+remain future architecture.
 
 ## Current capabilities vs planned
 
 | Area | Current | Future |
 | --- | --- | --- |
-| UI | Minimal Ratatui shell | Multiple Ratatui clients connected to the daemon |
+| UI | Minimal Ratatui shell | Live agent rows in multiple Ratatui clients connected to the daemon |
 | Transport | None | Authenticated loopback HTTP + SSE |
-| State | Empty-state only | Daemon state fold with reconciliation |
-| Agents | None | Agent adapters and collectors |
-| Tmux | None | Safe tmux interaction behind the daemon boundary |
+| State | Typed in-memory fallback snapshots and one-shot inspect rendering | Daemon state fold with reconciliation |
+| Agents | Pane-derived fallback identities only | Agent adapters and authoritative identities |
+| Tmux | Strict `list-panes` collection behind an in-process daemon facade | Broader safe tmux interaction, polling, and adaptive collection |
 | Search | None | Search index plus persistence |
 | Git / PR | None | Bounded cached provider |
 | Cancellation / flow control | None | Tokio cancellation, backpressure, bounded channels, timeouts |
@@ -93,7 +97,7 @@ sequenceDiagram
 
 - Future Ratatui clients depend on the daemon API only.
 - The UI must not import or call tmux code.
-- Tmux interaction stays inside the daemon collector layer.
+- Tmux interaction stays inside the daemon collector layer or the one-shot inspect command.
 - Adapter and persistence code also stay below the API boundary.
 
 ## Authoritative Adapter / Source Precedence
@@ -160,7 +164,9 @@ All of the following remain planned architecture and are not implemented yet:
 - Authenticated loopback HTTP + SSE transport.
 - Daemon state fold and reconciliation loops.
 - Agent adapters and collectors.
-- Safe tmux interaction behind the daemon boundary.
+- Tmux interaction beyond the current read-only `list-panes` tracer.
+- Process-tree discovery beyond tmux current-command fallback evidence.
+- Polling beyond one-shot inspect.
 - Adaptive capture-pane.
 - Safe bracketed paste and scoped key forwarding.
 - Docked sidebar resize without pane movement.

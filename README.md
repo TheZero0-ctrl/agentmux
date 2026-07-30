@@ -5,9 +5,12 @@ agentmux is the terminal dashboard for coding-agent workflows.
 ## Current capabilities
 
 - CLI binary: `agentmux`
-- Supported command: `dashboard`
+- Supported commands: `dashboard`, `inspect`
 - Interactive surface: an empty-state Ratatui shell that shows `agentmux`, `No agents detected yet`, and `q quit`
 - Outside an interactive terminal, the binary exits successfully without opening the shell
+- Phase 2 tracer: daemon-owned, typed in-memory snapshots from strict read-only `tmux list-panes` output
+- One-shot inspect output: `agentmux inspect` runs discovery once and prints normalized tmux-derived state
+- Conservative fallback states for live shell, live command, stale, dead, and missing pane evidence
 
 ## Commands
 
@@ -15,7 +18,25 @@ agentmux is the terminal dashboard for coding-agent workflows.
 - `cargo test`
 - `cargo run`
 - `cargo run -- dashboard`
+- `cargo run -- inspect`
 - `cargo run -- --help`
+
+`agentmux inspect` prints a deterministic table when panes are discovered:
+
+```text
+agentmux inspect
+agents: 1
+agent_id	pane_id	state	evidence_source	evidence_freshness	evidence_confidence
+pane:%1	%1	idle	tmux	fresh	low
+```
+
+When no tmux panes are discovered, it prints:
+
+```text
+agentmux inspect
+agents: 0
+no agents discovered from tmux panes
+```
 
 ## Docs
 
