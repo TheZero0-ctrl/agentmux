@@ -8,14 +8,39 @@ use agentmux::inspect::{InspectError, run_inspect};
 use agentmux::tmux::{TmuxCommand, TmuxError, TmuxOutput};
 
 const FIELD_SEPARATOR: char = '\u{1f}';
-const EXPECTED_LIST_PANES_FORMAT: &str =
-    "#{pane_id}\u{1f}#{pane_pid}\u{1f}#{pane_dead}\u{1f}#{pane_current_command}";
+const EXPECTED_LIST_PANES_FORMAT: &str = "#{session_name}\u{1f}#{window_index}\u{1f}#{window_name}\u{1f}#{pane_id}\u{1f}#{pane_pid}\u{1f}#{pane_dead}\u{1f}#{pane_current_path}\u{1f}#{pane_current_command}";
+const NON_ENRICHING_PID: &str = "4294967295";
+
+fn tmux_row(fields: [&str; 8]) -> String {
+    fields.join(&FIELD_SEPARATOR.to_string())
+}
+
+fn live_row(
+    window_index: &str,
+    window_name: &str,
+    pane_id: &str,
+    workspace: &str,
+    command: &str,
+) -> String {
+    tmux_row([
+        "work",
+        window_index,
+        window_name,
+        pane_id,
+        NON_ENRICHING_PID,
+        "0",
+        workspace,
+        command,
+    ])
+}
 
 #[test]
 fn given_reversed_tmux_rows_when_inspected_then_output_is_deterministically_sorted() {
     // Given: tmux returns panes in reverse display order through the injected seam.
     let tmux_output = format!(
-        "%2{FIELD_SEPARATOR}202{FIELD_SEPARATOR}0{FIELD_SEPARATOR}python\n%1{FIELD_SEPARATOR}101{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n"
+        "{}\n{}\n",
+        live_row("1", "api", "%2", "/tmp/api", "python"),
+        live_row("0", "shell", "%1", "/tmp/shell", "bash"),
     );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let calls = command.calls();
@@ -30,9 +55,9 @@ fn given_reversed_tmux_rows_when_inspected_then_output_is_deterministically_sort
         String::from_utf8(stdout).expect("stdout is utf8"),
         "agentmux inspect\n\
 agents: 2\n\
-agent_id\tpane_id\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%1\t%1\tidle\ttmux\tfresh\tlow\n\
-pane:%2\t%2\tworking\ttmux\tfresh\tlow\n"
+agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
+pane:%1\tunknown\t0\tunknown\t%1\tunknown\tunknown\tunknown\tunknown\tshell\tidle\ttmux\tfresh\tlow\n\
+pane:%2\tunknown\t1\tunknown\t%2\tunknown\tunknown\tunknown\tunknown\tapi\tworking\ttmux\tfresh\tlow\n"
     );
 }
 
@@ -40,7 +65,10 @@ pane:%2\t%2\tworking\ttmux\tfresh\tlow\n"
 fn given_multi_digit_pane_ids_when_inspected_then_output_is_sorted_by_pane_number() {
     // Given: tmux returns multi-digit pane IDs before single-digit pane IDs.
     let tmux_output = format!(
-        "%10{FIELD_SEPARATOR}1000{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%2{FIELD_SEPARATOR}202{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%1{FIELD_SEPARATOR}101{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n"
+        "{}\n{}\n{}\n",
+        live_row("0", "ten", "%10", "/tmp/ten", "bash"),
+        live_row("9", "two", "%2", "/tmp/two", "bash"),
+        live_row("5", "one", "%1", "/tmp/one", "bash"),
     );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let mut stdout = Vec::new();
@@ -53,10 +81,10 @@ fn given_multi_digit_pane_ids_when_inspected_then_output_is_sorted_by_pane_numbe
         String::from_utf8(stdout).expect("stdout is utf8"),
         "agentmux inspect\n\
 agents: 3\n\
-agent_id\tpane_id\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%1\t%1\tidle\ttmux\tfresh\tlow\n\
-pane:%2\t%2\tidle\ttmux\tfresh\tlow\n\
-pane:%10\t%10\tidle\ttmux\tfresh\tlow\n"
+agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
+pane:%1\tunknown\t5\tunknown\t%1\tunknown\tunknown\tunknown\tunknown\tone\tidle\ttmux\tfresh\tlow\n\
+pane:%2\tunknown\t9\tunknown\t%2\tunknown\tunknown\tunknown\tunknown\ttwo\tidle\ttmux\tfresh\tlow\n\
+pane:%10\tunknown\t0\tunknown\t%10\tunknown\tunknown\tunknown\tunknown\tten\tidle\ttmux\tfresh\tlow\n"
     );
 }
 
@@ -64,7 +92,12 @@ pane:%10\t%10\tidle\ttmux\tfresh\tlow\n"
 fn given_leading_zero_pane_ids_when_inspected_then_output_is_sorted_by_numeric_magnitude() {
     // Given: tmux returns leading-zero pane IDs around canonical forms.
     let tmux_output = format!(
-        "%10{FIELD_SEPARATOR}1000{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%0002{FIELD_SEPARATOR}200{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%2{FIELD_SEPARATOR}202{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%0000{FIELD_SEPARATOR}400{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%0{FIELD_SEPARATOR}401{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n"
+        "{}\n{}\n{}\n{}\n{}\n",
+        live_row("10", "ten", "%10", "/tmp/ten", "bash"),
+        live_row("2", "two-a", "%0002", "/tmp/two-a", "bash"),
+        live_row("2", "two-b", "%2", "/tmp/two-b", "bash"),
+        live_row("0", "zero-a", "%0000", "/tmp/zero-a", "bash"),
+        live_row("0", "zero-b", "%0", "/tmp/zero-b", "bash"),
     );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let mut stdout = Vec::new();
@@ -77,19 +110,22 @@ fn given_leading_zero_pane_ids_when_inspected_then_output_is_sorted_by_numeric_m
         String::from_utf8(stdout).expect("stdout is utf8"),
         "agentmux inspect\n\
 agents: 5\n\
-agent_id\tpane_id\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%0\t%0\tidle\ttmux\tfresh\tlow\n\
-pane:%0000\t%0000\tidle\ttmux\tfresh\tlow\n\
-pane:%2\t%2\tidle\ttmux\tfresh\tlow\n\
-pane:%0002\t%0002\tidle\ttmux\tfresh\tlow\n\
-pane:%10\t%10\tidle\ttmux\tfresh\tlow\n"
+agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
+pane:%0\tunknown\t0\tunknown\t%0\tunknown\tunknown\tunknown\tunknown\tzero-b\tidle\ttmux\tfresh\tlow\n\
+pane:%0000\tunknown\t0\tunknown\t%0000\tunknown\tunknown\tunknown\tunknown\tzero-a\tidle\ttmux\tfresh\tlow\n\
+pane:%2\tunknown\t2\tunknown\t%2\tunknown\tunknown\tunknown\tunknown\ttwo-b\tidle\ttmux\tfresh\tlow\n\
+pane:%0002\tunknown\t2\tunknown\t%0002\tunknown\tunknown\tunknown\tunknown\ttwo-a\tidle\ttmux\tfresh\tlow\n\
+pane:%10\tunknown\t10\tunknown\t%10\tunknown\tunknown\tunknown\tunknown\tten\tidle\ttmux\tfresh\tlow\n"
     );
 }
 
 #[test]
 fn given_dead_tmux_row_when_inspected_then_dead_evidence_is_medium_confidence() {
     // Given: tmux returns a dead pane through the injected seam.
-    let tmux_output = format!("%1{FIELD_SEPARATOR}101{FIELD_SEPARATOR}1{FIELD_SEPARATOR}bash\n");
+    let tmux_output = format!(
+        "{}\n",
+        tmux_row(["work", "0", "api", "%1", "101", "1", "/tmp/api", "bash"])
+    );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let mut stdout = Vec::new();
 
@@ -101,8 +137,8 @@ fn given_dead_tmux_row_when_inspected_then_dead_evidence_is_medium_confidence() 
         String::from_utf8(stdout).expect("stdout is utf8"),
         "agentmux inspect\n\
 agents: 1\n\
-agent_id\tpane_id\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%1\t%1\texited\ttmux\tfresh\tmedium\n"
+agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
+pane:%1\tunknown\t0\tunknown\t%1\tunknown\tunknown\tunknown\tunknown\tapi\texited\ttmux\tfresh\tmedium\n"
     );
 }
 
@@ -125,16 +161,40 @@ fn given_empty_tmux_snapshot_when_inspected_then_output_explains_no_agents() {
 #[test]
 fn given_tmux_failure_when_inspected_then_error_is_typed_and_stdout_stays_empty() {
     // Given: discovery fails before any inspect output should be written.
-    let command = FakeTmuxCommand::new(Err(TmuxError::CommandFailed {
-        status: Some(1),
-        stderr: String::from("no server running"),
-    }));
+    let command = FakeTmuxCommand::new(Err(TmuxError::CommandFailed { status: Some(1) }));
     let mut stdout = Vec::new();
 
     // When: inspect runs once.
     let result = run_inspect(command, &mut stdout);
 
     // Then: the tmux error is wrapped and stdout remains untouched.
+    assert!(matches!(result, Err(InspectError::Tmux { .. })));
+    assert!(stdout.is_empty());
+}
+
+#[test]
+fn given_malformed_tmux_row_when_inspected_then_error_is_typed_and_stdout_stays_empty() {
+    // Given: discovery parses an invalid tmux row before inspect writes its preamble.
+    let tmux_output = format!(
+        "{}\n",
+        tmux_row([
+            "work",
+            "0",
+            "api",
+            "%1",
+            "not-a-pid",
+            "0",
+            "/tmp/api",
+            "bash"
+        ])
+    );
+    let command = FakeTmuxCommand::new(Ok(tmux_output));
+    let mut stdout = Vec::new();
+
+    // When: inspect runs once.
+    let result = run_inspect(command, &mut stdout);
+
+    // Then: the parse error is wrapped and stdout remains untouched.
     assert!(matches!(result, Err(InspectError::Tmux { .. })));
     assert!(stdout.is_empty());
 }
@@ -181,10 +241,7 @@ impl TmuxCommand for FakeTmuxCommand {
         self.result
             .borrow_mut()
             .take()
-            .ok_or_else(|| TmuxError::CommandFailed {
-                status: None,
-                stderr: String::from("fake tmux command exhausted before test completed"),
-            })
+            .ok_or(TmuxError::CommandFailed { status: None })
             .and_then(|output| output.map(TmuxOutput::new))
     }
 }

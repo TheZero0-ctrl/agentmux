@@ -1,14 +1,18 @@
-//! tmux list-panes command boundary and strict parser.
+//! tmux list-panes command boundary and strict parser facade.
+
+mod command;
+mod parser;
 
 use std::error::Error;
 use std::fmt;
-use std::process::Command;
 
-use crate::model::{Pane, PaneId, ProcessEvidence, ProcessLiveness};
+use crate::model::Pane;
+
+pub use command::{SystemTmuxCommand, TmuxCommand};
+pub use parser::parse_list_panes;
 
 const FIELD_SEPARATOR: char = '\u{1f}';
-const LIST_PANES_FORMAT: &str =
-    "#{pane_id}\u{1f}#{pane_pid}\u{1f}#{pane_dead}\u{1f}#{pane_current_command}";
+const LIST_PANES_FORMAT: &str = "#{session_name}\u{1f}#{window_index}\u{1f}#{window_name}\u{1f}#{pane_id}\u{1f}#{pane_pid}\u{1f}#{pane_dead}\u{1f}#{pane_current_path}\u{1f}#{pane_current_command}";
 
 /// Output returned by the injectable tmux command boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,59 +47,87 @@ pub enum TmuxError {
     CommandFailed {
         /// Process exit status code when available.
         status: Option<i32>,
-        /// Standard error emitted by tmux.
-        stderr: String,
     },
-    /// A row did not contain all required fields.
+    /// A row did not contain exactly the required fields.
     MalformedFieldCount {
-        /// Original malformed row.
-        row: String,
+        /// Zero-based row index in `tmux list-panes` output.
+        row_index: usize,
         /// Number of fields found in the row.
         fields: usize,
     },
-    /// A pane pid field was not a valid process id.
-    MalformedPid {
-        /// Original malformed row.
-        row: String,
-        /// Invalid pid field value.
-        value: String,
+    /// A specific row field could not be parsed into its typed model value.
+    MalformedField {
+        /// Zero-based row index in `tmux list-panes` output.
+        row_index: usize,
+        /// Static tmux field name.
+        field_name: &'static str,
+        /// Privacy-safe parse failure reason.
+        reason: FieldErrorReason,
     },
-    /// A pane dead field was not `0` or `1`.
-    MalformedBoolean {
-        /// Original malformed row.
-        row: String,
-        /// Invalid boolean field value.
-        value: String,
-    },
-    /// A parsed pane id was empty.
-    InvalidPaneId {
-        /// Original malformed row.
-        row: String,
-    },
+}
+
+/// Privacy-safe reason for a malformed tmux field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum FieldErrorReason {
+    /// Field contained a non-separator control character.
+    ControlCharacter,
+    /// Field was empty where tmux metadata requires a value.
+    Empty,
+    /// Field was not a valid unsigned integer.
+    InvalidUnsignedInteger,
+    /// Field was not one of tmux's `0` or `1` booleans.
+    InvalidBoolean,
+    /// Field was not a tmux `%<digits>` pane id.
+    InvalidPaneId,
+    /// Field contained path syntax where a display component was required.
+    PathComponent,
+}
+
+impl TmuxError {
+    /// Create a command failure while discarding tmux stderr.
+    #[must_use]
+    pub const fn command_failed(status: Option<i32>, _stderr: &str) -> Self {
+        Self::CommandFailed { status }
+    }
+}
+
+impl fmt::Display for FieldErrorReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ControlCharacter => formatter.write_str("control character"),
+            Self::Empty => formatter.write_str("empty"),
+            Self::InvalidUnsignedInteger => formatter.write_str("invalid unsigned integer"),
+            Self::InvalidBoolean => formatter.write_str("invalid boolean"),
+            Self::InvalidPaneId => formatter.write_str("invalid pane id"),
+            Self::PathComponent => formatter.write_str("path component"),
+        }
+    }
 }
 
 impl fmt::Display for TmuxError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CommandIo { source } => write!(formatter, "failed to execute tmux: {source}"),
-            Self::CommandFailed { status, stderr } => {
+            Self::CommandFailed { status } => {
                 formatter.write_str("tmux list-panes failed with status ")?;
                 match status {
                     Some(code) => write!(formatter, "{code}")?,
                     None => formatter.write_str("unknown")?,
                 }
-                write!(formatter, ": {stderr}")
+                formatter.write_str(": stderr discarded")
             }
-            Self::MalformedFieldCount { row, fields } => {
-                write!(formatter, "tmux row has {fields} fields: {row}")
+            Self::MalformedFieldCount { row_index, fields } => {
+                write!(formatter, "tmux row {row_index} has {fields} fields")
             }
-            Self::MalformedPid { row, value } => {
-                write!(formatter, "tmux row has invalid pid {value}: {row}")
-            }
-            Self::MalformedBoolean { row, value } => {
-                write!(formatter, "tmux row has invalid pane_dead {value}: {row}")
-            }
-            Self::InvalidPaneId { row } => write!(formatter, "tmux row has invalid pane id: {row}"),
+            Self::MalformedField {
+                row_index,
+                field_name,
+                reason,
+            } => write!(
+                formatter,
+                "tmux row {row_index} field {field_name} is invalid: {reason}"
+            ),
         }
     }
 }
@@ -106,44 +138,8 @@ impl Error for TmuxError {
             Self::CommandIo { source } => Some(source),
             Self::CommandFailed { .. }
             | Self::MalformedFieldCount { .. }
-            | Self::MalformedPid { .. }
-            | Self::MalformedBoolean { .. }
-            | Self::InvalidPaneId { .. } => None,
+            | Self::MalformedField { .. } => None,
         }
-    }
-}
-
-/// Injectable boundary for collecting tmux pane rows.
-pub trait TmuxCommand {
-    /// Run `tmux list-panes` with the supplied format string.
-    ///
-    /// # Errors
-    /// Returns [`TmuxError`] when command execution fails.
-    fn list_panes(&self, format: &str) -> Result<TmuxOutput, TmuxError>;
-}
-
-/// Production tmux command runner.
-#[derive(Clone, Copy, Debug, Default)]
-#[non_exhaustive]
-pub struct SystemTmuxCommand;
-
-impl TmuxCommand for SystemTmuxCommand {
-    fn list_panes(&self, format: &str) -> Result<TmuxOutput, TmuxError> {
-        let output = Command::new("tmux")
-            .args(["list-panes", "-a", "-F", format])
-            .output()
-            .map_err(|source| TmuxError::CommandIo { source })?;
-
-        if output.status.success() {
-            return Ok(TmuxOutput::new(
-                String::from_utf8_lossy(&output.stdout).into_owned(),
-            ));
-        }
-
-        Err(TmuxError::CommandFailed {
-            status: output.status.code(),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        })
     }
 }
 
@@ -154,83 +150,4 @@ impl TmuxCommand for SystemTmuxCommand {
 pub fn collect_panes(command: &impl TmuxCommand) -> Result<Vec<Pane>, TmuxError> {
     let output = command.list_panes(LIST_PANES_FORMAT)?;
     parse_list_panes(output.stdout())
-}
-
-/// Parse strict delimiter-separated `tmux list-panes` output.
-///
-/// # Errors
-/// Returns [`TmuxError`] when any row is malformed.
-pub fn parse_list_panes(output: &str) -> Result<Vec<Pane>, TmuxError> {
-    let mut panes = Vec::new();
-
-    for row in output.lines() {
-        panes.push(parse_row(row)?);
-    }
-
-    Ok(panes)
-}
-
-fn parse_row(row: &str) -> Result<Pane, TmuxError> {
-    let mut fields = row.splitn(4, FIELD_SEPARATOR);
-    let pane_id = next_field(&mut fields, row, RequiredField::Id)?;
-    let pid = next_field(&mut fields, row, RequiredField::Pid)?;
-    let dead = next_field(&mut fields, row, RequiredField::Dead)?;
-    let command = next_field(&mut fields, row, RequiredField::CurrentCommand)?;
-
-    let pane_id = PaneId::new(pane_id).map_err(|_error| TmuxError::InvalidPaneId {
-        row: row.to_owned(),
-    })?;
-    let pid = pid
-        .parse::<u32>()
-        .map_err(|_error| TmuxError::MalformedPid {
-            row: row.to_owned(),
-            value: pid.to_owned(),
-        })?;
-    let liveness = parse_liveness(dead, row)?;
-
-    Ok(Pane::new(
-        pane_id,
-        ProcessEvidence::from_tmux(pid, command, liveness),
-    ))
-}
-
-fn next_field<'row>(
-    fields: &mut impl Iterator<Item = &'row str>,
-    row: &str,
-    required_field: RequiredField,
-) -> Result<&'row str, TmuxError> {
-    fields.next().ok_or_else(|| TmuxError::MalformedFieldCount {
-        row: row.to_owned(),
-        fields: required_field.previous_field_count(),
-    })
-}
-
-#[derive(Clone, Copy, Debug)]
-enum RequiredField {
-    Id,
-    Pid,
-    Dead,
-    CurrentCommand,
-}
-
-impl RequiredField {
-    const fn previous_field_count(self) -> usize {
-        match self {
-            Self::Id => 0,
-            Self::Pid => 1,
-            Self::Dead => 2,
-            Self::CurrentCommand => 3,
-        }
-    }
-}
-
-fn parse_liveness(value: &str, row: &str) -> Result<ProcessLiveness, TmuxError> {
-    match value {
-        "0" => Ok(ProcessLiveness::Live),
-        "1" => Ok(ProcessLiveness::Dead),
-        _ => Err(TmuxError::MalformedBoolean {
-            row: row.to_owned(),
-            value: value.to_owned(),
-        }),
-    }
 }

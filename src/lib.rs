@@ -16,6 +16,8 @@ pub mod inspect;
 pub mod model;
 /// Generic process normalization.
 pub mod process;
+/// Shared projection from discovery state to presentation rows.
+pub mod projection;
 /// Dashboard runner boundary.
 pub mod runner;
 /// Deterministic state normalization.

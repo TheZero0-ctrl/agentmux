@@ -20,6 +20,7 @@ pub enum KeyInput {
 pub const fn handle_key(input: KeyInput) -> Option<Action> {
     match input {
         KeyInput::Character('q') | KeyInput::Escape | KeyInput::ControlC => Some(Action::Quit),
+        KeyInput::Character('r' | 'R') => Some(Action::Refresh),
         KeyInput::Character(_) | KeyInput::Other => None,
     }
 }
@@ -55,6 +56,24 @@ mod tests {
         // Then: the dashboard should exit.
         let action = handle_key(KeyInput::ControlC);
         assert_eq!(action, Some(Action::Quit));
+    }
+
+    #[test]
+    fn given_lowercase_r_when_handled_then_it_refreshes() {
+        // Given: a manual refresh key input.
+        // When: the key is translated.
+        // Then: the dashboard should refresh immediately.
+        let action = handle_key(KeyInput::Character('r'));
+        assert_eq!(action, Some(Action::Refresh));
+    }
+
+    #[test]
+    fn given_uppercase_r_when_handled_then_it_refreshes() {
+        // Given: an uppercase manual refresh key input.
+        // When: the key is translated.
+        // Then: the dashboard should refresh immediately.
+        let action = handle_key(KeyInput::Character('R'));
+        assert_eq!(action, Some(Action::Refresh));
     }
 
     #[test]

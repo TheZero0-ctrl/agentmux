@@ -1,7 +1,7 @@
 # agentmux Specification
 
 ## Problem
-Teams that use multiple coding agents need one place to see which agent is active, what it is waiting on, and whether a branch or PR needs attention. The foundation in this repo only proves the CLI entrypoint and a minimal interactive empty-state TUI; it does not yet coordinate real agents, live previews, or repository workflows.
+Teams that use multiple coding agents need one place to see which local sessions may be active, what reliable evidence exists for them, and whether future branch or PR context needs attention. The current repo now ships local tmux plus Linux procfs discovery and a synchronous terminal dashboard, but it does not yet coordinate authoritative agent adapters, live previews, actions, network transport, persistence, or repository workflows.
 
 ## Users
 - Individual developers juggling Claude Code, Codex, Cursor, OpenCode, Pi, Gemini CLI, and custom configured agents.
@@ -22,13 +22,17 @@ Teams that use multiple coding agents need one place to see which agent is activ
 ## Non-Goals
 - Replacing the user’s agent clients.
 - Editing agent internals or simulating agent output.
-- Building the full orchestration layer in the foundation.
-- Persisting cross-session history beyond what the foundation needs.
-- Adding every planned capability now.
+- Treating a process basename as exact agent identity.
+- Inferring waiting states from tmux, procfs, command names, terminal content, or process trees.
+- Reading or displaying full command lines, prompts, diffs, credentials, environments, terminal content, or full workspace paths.
+- Shipping HTTP/SSE, daemon loops, persistence, Git/PR providers, previews, actions, or authoritative adapters in the current milestone.
 
 ## Terms
 - `agent`: one tracked coding assistant session from a supported client.
 - `dashboard`: the main UI that lists agents, status, and repository context.
+- `client candidate`: a low-confidence local hint from exact Linux procfs executable basename evidence, or `unknown`.
+- `workspace label`: a privacy-safe final path component, or `unknown`; it is not a full path.
+- `degraded`: a safe state shown when refresh or source evidence fails while preserving the last good rows where available.
 - `live preview`: the detail panel that shows the currently selected agent or repo item.
 - `act-in-place`: performing the next action from the dashboard instead of switching tools.
 - `docked sidebar`: a side panel that resizes while the main content stays fixed.
@@ -39,23 +43,30 @@ Teams that use multiple coding agents need one place to see which agent is activ
 ## Shipped Scope
 The current implementation is:
 - CLI startup.
-- `dashboard`: an interactive empty-state TUI shell.
-- `inspect`: a one-shot tmux-derived tracer that runs discovery once and prints normalized state.
-- Strict read-only `tmux list-panes` parsing into typed pane and process evidence.
-- Deterministic fallback agent rows for live shell, live command, stale, dead, missing, and empty snapshots.
+- `dashboard`: a synchronous in-process Ratatui dashboard that performs an initial refresh, refreshes automatically every second, supports manual `r` / `R` refresh, and quits with `q`, Esc, or Ctrl-C.
+- `inspect`: a one-shot local discovery command that runs discovery once and prints the shared normalized TSV row projection.
+- Shared inspect/dashboard row fields: `agent_id`, `session_name`, `window_index`, `window_name`, `pane_id`, `pid`, `process_name`, `client`, `client_confidence`, `workspace`, `state`, `evidence_source`, `evidence_freshness`, and `evidence_confidence`.
+- Strict read-only `tmux list-panes` parsing into typed session, window, pane, workspace label, and current-command evidence.
+- Linux procfs process-tree discovery for PID plus start-time identity and executable basename evidence. Non-Linux or unavailable procfs evidence degrades safely instead of claiming support.
+- Low-confidence client candidate classification for exact executable basenames `opencode`, `codex`, `claude`, and `gemini` only. Generic, lookalike, conflicting, missing, or degraded evidence remains `unknown`.
+- Deterministic fallback agent rows for live shell, live command, stale, dead, missing, degraded, and empty snapshots.
+- Degraded dashboard refresh handling that retains last good rows and shows a sanitized degraded message.
+- Privacy-safe presentation: full paths, argv, procfs cmdlines, raw session/window labels, prompts, diffs, credentials, environments, and terminal content are not displayed in rows. Session and window names render as `unknown`; numeric window indexes remain available because they are parsed typed metadata.
 
 Everything below remains **Planned — not implemented yet**.
 
 ## Planned — not implemented yet
 
 ### Agent Clients
-- Claude Code
-- Codex
-- Cursor
-- OpenCode
-- Pi
-- Gemini CLI
-- Configured custom agents
+- Authoritative Claude Code adapter.
+- Authoritative Codex adapter.
+- Authoritative Cursor adapter.
+- Authoritative OpenCode adapter.
+- Authoritative Pi adapter.
+- Authoritative Gemini CLI adapter.
+- Configured custom agent adapters.
+
+The shipped basename hints for `opencode`, `codex`, `claude`, and `gemini` are only low-confidence local candidates. They do not implement authoritative client identity.
 
 ### Agent States
 - `idle`: shipped for live shell fallback evidence.
@@ -67,7 +78,7 @@ Everything below remains **Planned — not implemented yet**.
 - `waiting_question`: planned for authoritative hook/log evidence.
 
 ### Dashboard Capabilities
-- Main dashboard with agent rows and repository context.
+- Repository context beyond privacy-safe workspace labels.
 - Live preview for the selected agent, branch, worktree, or PR.
 - Act-in-place responses from the focused row or panel.
 - Docked sidebar resizing without moving the main layout.
@@ -83,9 +94,10 @@ Everything below remains **Planned — not implemented yet**.
 - Adaptive preview polling tied to current activity.
 
 ### Discovery Beyond One-Shot Inspect
+- Cross-platform procfs-equivalent process discovery remains unimplemented.
 - Long-running daemon loop.
 - Polling or evented reconciliation.
-- Process-tree discovery beyond the current tmux current-command fallback.
+- Process-tree discovery beyond the shipped Linux procfs basename hints.
 - Hooks, markers, structured logs, and terminal-content adapters.
 - HTTP/SSE transport for live UI rows.
 
@@ -98,6 +110,8 @@ Everything below remains **Planned — not implemented yet**.
 - Keep local agent context local unless the user chooses otherwise.
 - Minimize captured metadata to what the dashboard needs.
 - Make privacy boundaries visible in the UI.
+- Display sanitized workspace labels instead of full paths.
+- Do not read procfs cmdlines, environments, prompts, diffs, credentials, or terminal content for the shipped local discovery row.
 
 ### Performance
 - Keep startup fast.
@@ -112,10 +126,12 @@ Everything below remains **Planned — not implemented yet**.
 - Screen-reader-friendly labels where the terminal stack allows them.
 
 ## Measurable Acceptance
-- The foundation starts as a CLI and opens the interactive empty-state TUI.
-- `agentmux inspect` runs one tmux discovery pass and prints deterministic normalized output.
+- The CLI starts and opens the synchronous local discovery dashboard in an interactive terminal.
+- `agentmux inspect` runs one local discovery pass and prints deterministic normalized output with the shipped enriched header.
 - Empty inspect snapshots explain that no agents were discovered from tmux panes.
 - tmux discovery failures exit nonzero without partial inspect stdout.
+- Dashboard tests cover the documented controls and degraded refresh behavior.
+- Low-confidence Linux procfs candidate semantics and privacy boundaries are documented as shipped behavior.
 - The spec clearly separates shipped scope from planned capabilities.
 - Every later capability in this document is labeled `Planned — not implemented yet`.
 - The document includes problem, users, goals, non-goals, and terms.

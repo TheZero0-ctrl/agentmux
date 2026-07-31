@@ -5,15 +5,12 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::daemon::DiscoveryService;
-use crate::model::{Agent, AgentState, EvidenceConfidence, EvidenceFreshness, EvidenceSource};
+use crate::projection::{AgentProjectionRow, project_snapshot};
 use crate::tmux::{TmuxCommand, TmuxError};
 
 /// Error returned by the one-shot inspect command.
 #[derive(Debug)]
-#[allow(
-    clippy::exhaustive_enums,
-    reason = "inspect errors are crate-owned and intentionally closed"
-)]
+#[non_exhaustive]
 pub enum InspectError {
     /// Discovery failed while reading tmux state.
     Tmux {
@@ -73,123 +70,47 @@ impl From<io::Error> for InspectError {
 pub fn run_inspect(command: impl TmuxCommand, writer: &mut impl Write) -> Result<(), InspectError> {
     let mut discovery = DiscoveryService::new(command);
     let snapshot = discovery.refresh()?;
+    let rows = project_snapshot(&snapshot);
 
     writeln!(writer, "agentmux inspect")?;
-    writeln!(writer, "agents: {}", snapshot.len())?;
+    writeln!(writer, "agents: {}", rows.len())?;
 
-    if snapshot.is_empty() {
+    if rows.is_empty() {
         writeln!(writer, "no agents discovered from tmux panes")?;
         return Ok(());
     }
 
     writeln!(
         writer,
-        "agent_id\tpane_id\tstate\tevidence_source\tevidence_freshness\tevidence_confidence"
+        "agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence"
     )?;
 
-    let mut agents = snapshot.agents().collect::<Vec<_>>();
-    agents.sort_by(|left, right| compare_agent_rows(left, right));
-
-    for agent in agents {
-        write_agent_row(writer, agent)?;
+    for row in rows {
+        write_agent_row(writer, &row)?;
     }
 
     Ok(())
 }
 
-fn write_agent_row(writer: &mut impl Write, agent: &Agent) -> Result<(), InspectError> {
-    let evidence = agent.evidence();
-
+fn write_agent_row(writer: &mut impl Write, row: &AgentProjectionRow) -> Result<(), InspectError> {
     writeln!(
         writer,
-        "{}\t{}\t{}\t{}\t{}\t{}",
-        agent.id().as_str(),
-        agent.pane_id().as_str(),
-        agent_state_name(agent.state()),
-        evidence_source_name(evidence.source()),
-        evidence_freshness_name(evidence.freshness()),
-        evidence_confidence_name(evidence.confidence())
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        row.agent_id(),
+        row.session_name(),
+        row.window_index(),
+        row.window_name(),
+        row.pane_id(),
+        row.pid(),
+        row.process_name(),
+        row.client(),
+        row.client_confidence(),
+        row.workspace(),
+        row.state(),
+        row.evidence_source(),
+        row.evidence_freshness(),
+        row.evidence_confidence()
     )?;
 
     Ok(())
-}
-
-fn compare_agent_rows(left: &Agent, right: &Agent) -> std::cmp::Ordering {
-    let left_key = pane_sort_key(left);
-    let right_key = pane_sort_key(right);
-
-    left_key
-        .significant_digits
-        .len()
-        .cmp(&right_key.significant_digits.len())
-        .then_with(|| {
-            left_key
-                .significant_digits
-                .cmp(right_key.significant_digits)
-        })
-        .then_with(|| left_key.raw_digits.len().cmp(&right_key.raw_digits.len()))
-        .then_with(|| left_key.raw_digits.cmp(right_key.raw_digits))
-        .then_with(|| left.id().as_str().cmp(right.id().as_str()))
-}
-
-fn pane_sort_key(agent: &Agent) -> PaneSortKey<'_> {
-    let raw_digits = agent
-        .pane_id()
-        .as_str()
-        .strip_prefix('%')
-        .map_or_else(|| agent.pane_id().as_str(), |digits| digits);
-    let significant_digits = significant_digit_suffix(raw_digits);
-
-    PaneSortKey {
-        raw_digits,
-        significant_digits,
-    }
-}
-
-fn significant_digit_suffix(raw_digits: &str) -> &str {
-    let trimmed = raw_digits.trim_start_matches('0');
-
-    match trimmed {
-        "" => "0",
-        digits => digits,
-    }
-}
-
-struct PaneSortKey<'agent> {
-    raw_digits: &'agent str,
-    significant_digits: &'agent str,
-}
-
-const fn agent_state_name(state: AgentState) -> &'static str {
-    match state {
-        AgentState::Idle => "idle",
-        AgentState::Working => "working",
-        AgentState::WaitingPermission => "waiting_permission",
-        AgentState::WaitingPlanApproval => "waiting_plan_approval",
-        AgentState::WaitingQuestion => "waiting_question",
-        AgentState::Unknown => "unknown",
-        AgentState::Exited => "exited",
-    }
-}
-
-const fn evidence_source_name(source: EvidenceSource) -> &'static str {
-    match source {
-        EvidenceSource::Tmux => "tmux",
-        EvidenceSource::Process => "process",
-        EvidenceSource::MissingPane => "missing_pane",
-    }
-}
-
-const fn evidence_freshness_name(freshness: EvidenceFreshness) -> &'static str {
-    match freshness {
-        EvidenceFreshness::Fresh => "fresh",
-        EvidenceFreshness::Stale => "stale",
-    }
-}
-
-const fn evidence_confidence_name(confidence: EvidenceConfidence) -> &'static str {
-    match confidence {
-        EvidenceConfidence::Low => "low",
-        EvidenceConfidence::Medium => "medium",
-    }
 }

@@ -1,106 +1,39 @@
 //! Phase 2 tracer seam tests for tmux/process discovery.
 
+#[path = "discovery/reconciliation.rs"]
+mod reconciliation;
+#[path = "discovery/reconciliation_service.rs"]
+mod reconciliation_service;
+#[path = "discovery/service_integration.rs"]
+mod service_integration;
+#[path = "discovery/tmux_contracts.rs"]
+mod tmux_contracts;
+#[path = "discovery/tmux_privacy_contracts.rs"]
+mod tmux_privacy_contracts;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::io;
 
 use agentmux::daemon::DiscoveryService;
 use agentmux::model::{
     AgentId, AgentState, EvidenceConfidence, EvidenceFreshness, EvidenceSource, Pane, PaneId,
     ProcessEvidence,
 };
-use agentmux::process::classify_process;
 use agentmux::state::{AgentSnapshot, normalize_snapshot};
-use agentmux::tmux::{TmuxCommand, TmuxError, TmuxOutput, parse_list_panes};
+use agentmux::tmux::{TmuxCommand, TmuxError, TmuxOutput};
 
 const FIELD_SEPARATOR: char = '\u{1f}';
-const EXPECTED_LIST_PANES_FORMAT: &str =
-    "#{pane_id}\u{1f}#{pane_pid}\u{1f}#{pane_dead}\u{1f}#{pane_current_command}";
+const EXPECTED_LIST_PANES_FORMAT: &str = "#{session_name}\u{1f}#{window_index}\u{1f}#{window_name}\u{1f}#{pane_id}\u{1f}#{pane_pid}\u{1f}#{pane_dead}\u{1f}#{pane_current_path}\u{1f}#{pane_current_command}";
 
-#[test]
-fn given_tmux_rows_when_parsed_then_valid_rows_become_panes() {
-    // Given: delimiter-separated tmux list-panes rows.
-    let output = format!(
-        "%1{FIELD_SEPARATOR}123{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n%2{FIELD_SEPARATOR}456{FIELD_SEPARATOR}1{FIELD_SEPARATOR}zsh\n"
-    );
-
-    // When: the list-panes output is parsed.
-    let panes = parse_list_panes(&output).expect("tmux rows parse");
-
-    // Then: valid rows become typed panes with process evidence.
-    assert_eq!(panes.len(), 2);
-    let mut panes = panes.iter();
-    let first = panes.next().expect("first pane exists");
-    let second = panes.next().expect("second pane exists");
-    assert_eq!(first.id().as_str(), "%1");
-    assert_eq!(first.process().pid(), Some(123));
-    assert_eq!(first.process().command(), Some("bash"));
-    assert_eq!(second.process().pid(), Some(456));
-    assert_eq!(
-        second.process().evidence().confidence(),
-        EvidenceConfidence::Medium
-    );
-    assert_eq!(classify_process(second.process()), AgentState::Exited);
-}
-
-#[test]
-fn given_command_contains_field_separator_when_parsed_then_command_remainder_is_preserved() {
-    // Given: tmux emits a command value containing the record field separator.
-    let output = format!(
-        "%1{FIELD_SEPARATOR}123{FIELD_SEPARATOR}0{FIELD_SEPARATOR}shell{FIELD_SEPARATOR}detail\n"
-    );
-
-    // When: the list-panes output is parsed.
-    let panes = parse_list_panes(&output).expect("tmux row parses");
-
-    // Then: only the first three separators split fields and the command remainder is intact.
-    assert_eq!(panes.len(), 1);
-    assert_eq!(
-        panes.first().and_then(|pane| pane.process().command()),
-        Some("shell\u{1f}detail")
-    );
-}
-
-#[test]
-fn given_invalid_tmux_rows_when_parsed_then_errors_are_typed() {
-    // Given: malformed field count, pid, boolean, invalid id, and empty tmux outputs.
-    let missing_fields = format!("%1{FIELD_SEPARATOR}123{FIELD_SEPARATOR}0\n");
-    let malformed_pid = format!("%1{FIELD_SEPARATOR}abc{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n");
-    let malformed_bool =
-        format!("%1{FIELD_SEPARATOR}123{FIELD_SEPARATOR}maybe{FIELD_SEPARATOR}bash\n");
-    let invalid_pane_id =
-        format!("%1\tbad{FIELD_SEPARATOR}123{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n");
-
-    // When: each output is parsed.
-    // Then: malformed data is rejected while empty output is a valid empty snapshot.
-    assert!(matches!(
-        parse_list_panes(&missing_fields),
-        Err(TmuxError::MalformedFieldCount { .. })
-    ));
-    assert!(matches!(
-        parse_list_panes(&malformed_pid),
-        Err(TmuxError::MalformedPid { .. })
-    ));
-    assert!(matches!(
-        parse_list_panes(&malformed_bool),
-        Err(TmuxError::MalformedBoolean { .. })
-    ));
-    assert!(matches!(
-        parse_list_panes(&invalid_pane_id),
-        Err(TmuxError::InvalidPaneId { .. })
-    ));
-    assert_eq!(
-        parse_list_panes("").expect("empty output parses"),
-        Vec::new()
-    );
+fn tmux_row(fields: [&str; 8]) -> String {
+    fields.join(&FIELD_SEPARATOR.to_string())
 }
 
 #[test]
 fn given_tmux_command_failure_when_refreshed_then_the_error_surfaces() {
     // Given: an injectable tmux command boundary that fails.
-    let command = FakeTmuxCommand::new([Err(TmuxError::CommandFailed {
-        status: Some(1),
-        stderr: String::from("no server running"),
-    })]);
+    let command = FakeTmuxCommand::new([Err(TmuxError::CommandFailed { status: Some(1) })]);
     let mut service = DiscoveryService::new(command);
 
     // When: discovery refreshes from tmux.
@@ -135,9 +68,9 @@ fn given_pane_snapshot_when_normalized_then_agents_are_deterministic_and_conserv
     assert_eq!(
         snapshot.agent_ids(),
         vec![
-            AgentId::new("pane:%1").expect("agent id is valid"),
-            AgentId::new("pane:%2").expect("agent id is valid"),
-            AgentId::new("pane:%3").expect("agent id is valid"),
+            AgentId::from_pane_id(&PaneId::new("%1").expect("pane id is valid")),
+            AgentId::from_pane_id(&PaneId::new("%2").expect("pane id is valid")),
+            AgentId::from_pane_id(&PaneId::new("%3").expect("pane id is valid")),
         ]
     );
     assert_eq!(snapshot.agent_state("pane:%1"), Some(AgentState::Idle));
@@ -170,7 +103,10 @@ fn given_previous_pane_missing_when_normalized_then_it_exits_with_missing_eviden
 #[test]
 fn given_discovery_service_when_refreshed_then_it_retains_only_previous_snapshot() {
     // Given: a daemon-owned discovery facade with three fake tmux snapshots.
-    let first = format!("%1{FIELD_SEPARATOR}101{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n");
+    let first = format!(
+        "{}\n",
+        tmux_row(["work", "0", "api", "%1", "101", "0", "/tmp", "bash"])
+    );
     let command = FakeTmuxCommand::new([Ok(first), Ok(String::new()), Ok(String::new())]);
     let mut service = DiscoveryService::new(command);
 
@@ -188,13 +124,13 @@ fn given_discovery_service_when_refreshed_then_it_retains_only_previous_snapshot
 #[test]
 fn given_failed_refresh_between_snapshots_when_refreshed_then_last_success_is_retained() {
     // Given: a successful snapshot, a tmux failure, and a later empty snapshot.
-    let first = format!("%1{FIELD_SEPARATOR}101{FIELD_SEPARATOR}0{FIELD_SEPARATOR}bash\n");
+    let first = format!(
+        "{}\n",
+        tmux_row(["work", "0", "api", "%1", "101", "0", "/tmp", "bash"])
+    );
     let command = FakeTmuxCommand::new([
         Ok(first),
-        Err(TmuxError::CommandFailed {
-            status: Some(1),
-            stderr: String::from("temporary tmux failure"),
-        }),
+        Err(TmuxError::CommandFailed { status: Some(1) }),
         Ok(String::new()),
     ]);
     let mut service = DiscoveryService::new(command);
@@ -226,13 +162,13 @@ impl TmuxCommand for FakeTmuxCommand {
     fn list_panes(&self, format: &str) -> Result<TmuxOutput, TmuxError> {
         assert_eq!(format, EXPECTED_LIST_PANES_FORMAT);
 
-        self.outputs
-            .borrow_mut()
-            .pop_front()
-            .ok_or_else(|| TmuxError::CommandFailed {
-                status: None,
-                stderr: String::from("fake tmux command exhausted before test completed"),
-            })
-            .and_then(|output| output.map(TmuxOutput::new))
+        self.outputs.borrow_mut().pop_front().map_or_else(
+            || {
+                Err(TmuxError::CommandIo {
+                    source: io::Error::other("fake tmux command exhausted"),
+                })
+            },
+            |output| output.map(TmuxOutput::new),
+        )
     }
 }

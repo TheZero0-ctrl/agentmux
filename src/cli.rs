@@ -26,10 +26,7 @@ pub struct Cli {
 
 /// Supported CLI commands.
 #[derive(Debug, Subcommand)]
-#[allow(
-    clippy::exhaustive_enums,
-    reason = "the command set is intentionally crate-owned and tiny"
-)]
+#[non_exhaustive]
 pub enum Command {
     /// Open the dashboard.
     Dashboard,
@@ -115,10 +112,7 @@ mod tests {
     fn given_inspect_tmux_error_when_finished_then_cli_fails() {
         // Given: inspect returned a tmux discovery error.
         let inspect_result = Err(InspectError::Tmux {
-            source: TmuxError::CommandFailed {
-                status: Some(1),
-                stderr: String::from("tmux failed"),
-            },
+            source: TmuxError::CommandFailed { status: Some(1) },
         });
         let mut stdout = FlushWriter::ok();
 

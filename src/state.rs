@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
     Agent, AgentId, AgentState, Evidence, EvidenceConfidence, EvidenceFreshness, EvidenceSource,
-    Pane,
+    Pane, PaneId, ProcessMetadata,
 };
 use crate::process::classify_process;
 
@@ -35,14 +35,7 @@ impl AgentSnapshot {
     /// Return a normalized agent by id text.
     #[must_use]
     pub fn agent(&self, id: &str) -> Option<&Agent> {
-        let agent_id = match AgentId::new(id) {
-            Ok(agent_id) => agent_id,
-            Err(
-                crate::model::ModelError::EmptyId
-                | crate::model::ModelError::ControlCharacter
-                | crate::model::ModelError::InvalidPaneIdFormat,
-            ) => return None,
-        };
+        let agent_id = agent_id_for_lookup(id)?;
 
         self.agents.get(&agent_id)
     }
@@ -60,6 +53,17 @@ impl AgentSnapshot {
     }
 }
 
+fn agent_id_for_lookup(id: &str) -> Option<AgentId> {
+    id.strip_prefix("pane:").map_or_else(
+        || AgentId::new(id).ok(),
+        |pane_id| {
+            PaneId::new(pane_id)
+                .ok()
+                .map(|pane_id| AgentId::from_pane_id(&pane_id))
+        },
+    )
+}
+
 /// Normalize the latest successful pane snapshot into deterministic agent state.
 #[must_use]
 pub fn normalize_snapshot(
@@ -71,24 +75,17 @@ pub fn normalize_snapshot(
 
     for pane in panes {
         let pane_id = pane.id().clone();
-        let agent_id = AgentId::from_pane_id(&pane_id);
         let state = classify_process(pane.process());
-        let evidence = pane.process().evidence();
 
         live_pane_ids.insert(pane_id.clone());
-        agents.insert(
-            agent_id.clone(),
-            Agent {
-                id: agent_id,
-                pane_id,
-                state,
-                evidence,
-            },
-        );
+        let agent = Agent::new(pane.observation(state));
+        agents.insert(agent.id().clone(), agent);
     }
 
     for agent in previous.agents.values() {
-        if agent.state() == AgentState::Exited {
+        if agent.state() == AgentState::Exited
+            && agent.evidence().source() == EvidenceSource::MissingPane
+        {
             continue;
         }
 
@@ -98,12 +95,15 @@ pub fn normalize_snapshot(
 
         agents.insert(
             agent.id().clone(),
-            Agent {
-                id: agent.id().clone(),
-                pane_id: agent.pane_id().clone(),
-                state: AgentState::Exited,
-                evidence: missing_pane_evidence(),
-            },
+            Agent::new(
+                agent
+                    .observation()
+                    .with_process_metadata_and_state_evidence(
+                        ProcessMetadata::unknown(),
+                        AgentState::Exited,
+                        missing_pane_evidence(),
+                    ),
+            ),
         );
     }
 

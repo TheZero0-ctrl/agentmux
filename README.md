@@ -6,11 +6,15 @@ agentmux is the terminal dashboard for coding-agent workflows.
 
 - CLI binary: `agentmux`
 - Supported commands: `dashboard`, `inspect`
-- Interactive surface: an empty-state Ratatui shell that shows `agentmux`, `No agents detected yet`, and `q quit`
+- Interactive surface: a Ratatui dashboard that renders the same normalized local discovery rows as `inspect`
 - Outside an interactive terminal, the binary exits successfully without opening the shell
-- Phase 2 tracer: daemon-owned, typed in-memory snapshots from strict read-only `tmux list-panes` output
-- One-shot inspect output: `agentmux inspect` runs discovery once and prints normalized tmux-derived state
-- Conservative fallback states for live shell, live command, stale, dead, and missing pane evidence
+- Local discovery: strict read-only `tmux list-panes` collection plus Linux procfs process-tree evidence when available
+- Linux-first candidate hints: exact executable basenames `opencode`, `codex`, `claude`, and `gemini` appear only as low-confidence candidates, never as authoritative identities
+- Unknown semantics: missing, degraded, conflicting, generic, lookalike, or incomplete process evidence stays `unknown`
+- Conservative states: live shell, live command, stale, dead, and missing pane evidence map to safe fallback states; waiting states are not inferred from tmux or procfs
+- Dashboard refresh: synchronous in-process initial refresh, automatic refresh every second, manual `r` / `R` refresh, and quit controls `q`, Esc, and Ctrl-C
+- Degraded behavior: refresh failures keep the last good dashboard rows and show a sanitized degraded message
+- Privacy boundary: rows display sanitized workspace basenames and executable basenames only; full paths, argv, prompts, diffs, credentials, terminal content, and procfs cmdlines are not displayed or retained in presentation rows
 
 ## Commands
 
@@ -26,9 +30,13 @@ agentmux is the terminal dashboard for coding-agent workflows.
 ```text
 agentmux inspect
 agents: 1
-agent_id	pane_id	state	evidence_source	evidence_freshness	evidence_confidence
-pane:%1	%1	idle	tmux	fresh	low
+agent_id	session_name	window_index	window_name	pane_id	pid	process_name	client	client_confidence	workspace	state	evidence_source	evidence_freshness	evidence_confidence
+pane:%1	unknown	0	unknown	%1	1234	opencode	opencode	low	agentmux	working	tmux	fresh	low
 ```
+
+The `session_name` and `window_name` columns render as `unknown`; raw tmux labels can contain prompts, tokens, diffs, or other sensitive text.
+
+The `client` column is a low-confidence local candidate derived from an exact executable basename on Linux procfs evidence. It is `unknown` when evidence is missing, conflicting, unsupported, generic, unavailable, or not Linux procfs-backed.
 
 When no tmux panes are discovered, it prints:
 
@@ -46,10 +54,10 @@ no agents discovered from tmux panes
 
 ## Roadmap
 
-The roadmap is tracked in `docs/plan.md` and moves through these phases:
+The roadmap is tracked in `docs/plan.md`. Shipped local discovery currently stops before network transport, daemon loops, authoritative adapters, previews/actions, Git/PR enrichment, search persistence, and cross-session persistence.
 
 1. Foundation
-2. tmux/process discovery + state
+2. tmux/Linux procfs discovery + state
 3. hooks/log adapters
 4. daemon/SSE/reconciliation
 5. preview/action
