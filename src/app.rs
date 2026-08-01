@@ -8,6 +8,20 @@ pub enum Action {
     Quit,
     /// Refresh dashboard discovery immediately.
     Refresh,
+    /// Select the next dashboard row.
+    SelectNext,
+    /// Select the previous dashboard row.
+    SelectPrevious,
+    /// Select the first dashboard row.
+    SelectFirst,
+    /// Select the last dashboard row.
+    SelectLast,
+    /// Move selection down by a page-sized step.
+    PageNext,
+    /// Move selection up by a page-sized step.
+    PagePrevious,
+    /// Toggle the dashboard help overlay.
+    ToggleHelp,
 }
 
 /// Owned dashboard row copied from the shared presentation projection.
@@ -35,6 +49,8 @@ pub struct App {
     running: bool,
     rows: Vec<DashboardRow>,
     degraded_message: Option<String>,
+    selected_index: usize,
+    help_visible: bool,
 }
 
 impl App {
@@ -44,6 +60,8 @@ impl App {
             running: true,
             rows: Vec::new(),
             degraded_message: None,
+            selected_index: 0,
+            help_visible: false,
         }
     }
 
@@ -57,6 +75,26 @@ impl App {
         &self.rows
     }
 
+    /// Return the selected dashboard row index when rows are available.
+    pub const fn selected_index(&self) -> Option<usize> {
+        if self.rows.is_empty() {
+            None
+        } else {
+            Some(self.selected_index)
+        }
+    }
+
+    /// Return the selected dashboard row when rows are available.
+    pub fn selected_row(&self) -> Option<&DashboardRow> {
+        self.selected_index()
+            .and_then(|selected_index| self.rows.get(selected_index))
+    }
+
+    /// Return whether the help overlay is visible.
+    pub const fn is_help_visible(&self) -> bool {
+        self.help_visible
+    }
+
     /// Return the sanitized degraded refresh message when the last refresh failed.
     pub fn degraded_message(&self) -> Option<&str> {
         self.degraded_message.as_deref()
@@ -66,6 +104,7 @@ impl App {
     pub fn replace_rows(&mut self, rows: Vec<DashboardRow>) {
         self.rows = rows;
         self.degraded_message = None;
+        self.clamp_selection();
     }
 
     /// Mark refresh as degraded while retaining the last good rows.
@@ -74,17 +113,88 @@ impl App {
     }
 
     /// Apply a user action to the dashboard state.
-    pub const fn apply(&mut self, action: Action) {
+    pub fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => {
                 self.running = false;
             }
             Action::Refresh => {}
+            Action::SelectNext => self.move_selection(1),
+            Action::SelectPrevious => self.move_selection(-1),
+            Action::SelectFirst => self.selected_index = 0,
+            Action::SelectLast => self.select_last(),
+            Action::PageNext => self.move_selection(5),
+            Action::PagePrevious => self.move_selection(-5),
+            Action::ToggleHelp => self.help_visible = !self.help_visible,
+        }
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.rows.is_empty() {
+            self.selected_index = 0;
+            return;
+        }
+        self.selected_index = self
+            .selected_index
+            .saturating_add_signed(delta)
+            .min(self.rows.len().saturating_sub(1));
+    }
+
+    const fn select_last(&mut self) {
+        self.selected_index = self.rows.len().saturating_sub(1);
+    }
+
+    fn clamp_selection(&mut self) {
+        if self.rows.is_empty() {
+            self.selected_index = 0;
+        } else {
+            self.selected_index = self.selected_index.min(self.rows.len().saturating_sub(1));
         }
     }
 }
 
 impl DashboardRow {
+    /// Copy daemon TSV fields into app-owned dashboard state.
+    #[must_use]
+    pub fn from_tsv_fields(fields: &[&str]) -> Option<Self> {
+        let [
+            agent_id,
+            session_name,
+            window_index,
+            window_name,
+            pane_id,
+            pid,
+            process_name,
+            client,
+            client_confidence,
+            workspace,
+            state,
+            evidence_source,
+            evidence_freshness,
+            evidence_confidence,
+        ] = fields
+        else {
+            return None;
+        };
+
+        Some(Self {
+            agent_id: (*agent_id).to_owned(),
+            session_name: (*session_name).to_owned(),
+            window_index: (*window_index).to_owned(),
+            window_name: (*window_name).to_owned(),
+            pane_id: (*pane_id).to_owned(),
+            pid: (*pid).to_owned(),
+            process_name: (*process_name).to_owned(),
+            client: (*client).to_owned(),
+            client_confidence: (*client_confidence).to_owned(),
+            workspace: (*workspace).to_owned(),
+            state: (*state).to_owned(),
+            evidence_source: (*evidence_source).to_owned(),
+            evidence_freshness: (*evidence_freshness).to_owned(),
+            evidence_confidence: (*evidence_confidence).to_owned(),
+        })
+    }
+
     /// Copy a shared projection row into app-owned dashboard state.
     #[must_use]
     pub fn from_projection(row: &crate::projection::AgentProjectionRow) -> Self {
@@ -198,132 +308,4 @@ impl Default for App {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{Action, App, DashboardRow};
-
-    #[test]
-    fn initial_state_is_running_when_app_is_created() {
-        // Given: a newly created application model.
-        let app = App::new();
-
-        // When: the running state is inspected.
-        let running = app.is_running();
-
-        // Then: the application is running.
-        assert!(running);
-    }
-
-    #[test]
-    fn running_state_stops_when_quit_is_applied() {
-        // Given: a running application model.
-        let mut app = App::new();
-
-        // When: the quit action is applied.
-        app.apply(Action::Quit);
-
-        // Then: the application is no longer running.
-        assert!(!app.is_running());
-    }
-
-    #[test]
-    fn given_projected_rows_when_replaced_then_app_owns_rows_and_clears_degraded_message() {
-        // Given: a degraded application model and owned projected rows.
-        let mut app = App::new();
-        app.mark_degraded();
-        let rows = vec![DashboardRow::for_test("pane:%1")];
-
-        // When: the successful refresh rows are applied.
-        app.replace_rows(rows);
-
-        // Then: the rows are retained and the degraded message is cleared.
-        assert_eq!(app.rows(), &[DashboardRow::for_test("pane:%1")]);
-        assert_eq!(app.degraded_message(), None);
-    }
-
-    #[test]
-    fn given_existing_rows_when_refresh_degrades_then_rows_are_retained_with_safe_message() {
-        // Given: previously populated dashboard rows.
-        let mut app = App::new();
-        app.replace_rows(vec![DashboardRow::for_test("pane:%2")]);
-
-        // When: a refresh failure is marked degraded.
-        app.mark_degraded();
-
-        // Then: the last good rows remain and no raw error details are stored.
-        assert_eq!(app.rows(), &[DashboardRow::for_test("pane:%2")]);
-        assert_eq!(app.degraded_message(), Some("dashboard refresh degraded"));
-    }
-
-    impl DashboardRow {
-        pub(crate) fn for_test(agent_id: &str) -> Self {
-            Self {
-                agent_id: agent_id.to_owned(),
-                session_name: "work".to_owned(),
-                window_index: "3".to_owned(),
-                window_name: "editor".to_owned(),
-                pane_id: "%1".to_owned(),
-                pid: "777".to_owned(),
-                process_name: "codex".to_owned(),
-                client: "codex".to_owned(),
-                client_confidence: "low".to_owned(),
-                workspace: "project".to_owned(),
-                state: "idle".to_owned(),
-                evidence_source: "tmux".to_owned(),
-                evidence_freshness: "fresh".to_owned(),
-                evidence_confidence: "low".to_owned(),
-            }
-        }
-
-        pub(crate) fn with_location(
-            mut self,
-            session_name: &str,
-            window_index: &str,
-            window_name: &str,
-        ) -> Self {
-            self.session_name = session_name.to_owned();
-            self.window_index = window_index.to_owned();
-            self.window_name = window_name.to_owned();
-            self
-        }
-
-        pub(crate) fn with_pane(mut self, pane_id: &str) -> Self {
-            self.agent_id = format!("pane:{pane_id}");
-            self.pane_id = pane_id.to_owned();
-            self
-        }
-
-        pub(crate) fn with_process(mut self, pid: &str, process_name: &str) -> Self {
-            self.pid = pid.to_owned();
-            self.process_name = process_name.to_owned();
-            self
-        }
-
-        pub(crate) fn with_client(mut self, client: &str, confidence: &str) -> Self {
-            self.client = client.to_owned();
-            self.client_confidence = confidence.to_owned();
-            self
-        }
-
-        pub(crate) fn with_workspace(mut self, workspace: &str) -> Self {
-            self.workspace = workspace.to_owned();
-            self
-        }
-
-        pub(crate) fn with_state(mut self, state: &str) -> Self {
-            self.state = state.to_owned();
-            self
-        }
-
-        pub(crate) fn with_evidence(
-            mut self,
-            source: &str,
-            freshness: &str,
-            confidence: &str,
-        ) -> Self {
-            self.evidence_source = source.to_owned();
-            self.evidence_freshness = freshness.to_owned();
-            self.evidence_confidence = confidence.to_owned();
-            self
-        }
-    }
-}
+mod tests;

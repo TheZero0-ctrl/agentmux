@@ -1,7 +1,7 @@
 # agentmux Specification
 
 ## Problem
-Teams that use multiple coding agents need one place to see which local sessions may be active, what reliable evidence exists for them, and whether future branch or PR context needs attention. The current repo now ships local tmux plus Linux procfs discovery and a synchronous terminal dashboard, but it does not yet coordinate authoritative agent adapters, live previews, actions, network transport, persistence, or repository workflows.
+Teams that use multiple coding agents need one place to see which local sessions may be active, what reliable evidence exists for them, and whether future branch or PR context needs attention. The current repo now ships local tmux plus Linux procfs discovery, a synchronous terminal dashboard, and a loopback live daemon slice for authoritative waiting-state evidence. It does not yet coordinate client-specific adapters, live previews, actions, persistence, search, Git/PR, or repository workflows.
 
 ## Users
 - Individual developers juggling Claude Code, Codex, Cursor, OpenCode, Pi, Gemini CLI, and custom configured agents.
@@ -25,7 +25,7 @@ Teams that use multiple coding agents need one place to see which local sessions
 - Treating a process basename as exact agent identity.
 - Inferring waiting states from tmux, procfs, command names, terminal content, or process trees.
 - Reading or displaying full command lines, prompts, diffs, credentials, environments, terminal content, or full workspace paths.
-- Shipping HTTP/SSE, daemon loops, persistence, Git/PR providers, previews, actions, or authoritative adapters in the current milestone.
+- Shipping persistence, Git/PR providers, previews, actions, search, terminal-content adapters, or client-specific authoritative identity adapters in the current milestone.
 
 ## Terms
 - `agent`: one tracked coding assistant session from a supported client.
@@ -44,14 +44,17 @@ Teams that use multiple coding agents need one place to see which local sessions
 The current implementation is:
 - CLI startup.
 - `dashboard`: a synchronous in-process Ratatui dashboard that performs an initial refresh, refreshes automatically every second, supports manual `r` / `R` refresh, and quits with `q`, Esc, or Ctrl-C.
-- `inspect`: a one-shot local discovery command that runs discovery once and prints the shared normalized TSV row projection.
+- `inspect`: a one-shot local discovery command that runs discovery once and prints the shared normalized TSV row projection for agent rows only.
 - Shared inspect/dashboard row fields: `agent_id`, `session_name`, `window_index`, `window_name`, `pane_id`, `pid`, `process_name`, `client`, `client_confidence`, `workspace`, `state`, `evidence_source`, `evidence_freshness`, and `evidence_confidence`.
 - Strict read-only `tmux list-panes` parsing into typed session, window, pane, workspace label, and current-command evidence.
 - Linux procfs process-tree discovery for PID plus start-time identity and executable basename evidence. Non-Linux or unavailable procfs evidence degrades safely instead of claiming support.
 - Low-confidence client candidate classification for exact executable basenames `opencode`, `codex`, `claude`, and `gemini` only. Generic, lookalike, conflicting, missing, or degraded evidence remains `unknown`.
 - Deterministic fallback agent rows for live shell, live command, stale, dead, missing, degraded, and empty snapshots.
 - Degraded dashboard refresh handling that retains last good rows and shows a sanitized degraded message.
-- Privacy-safe presentation: full paths, argv, procfs cmdlines, raw session/window labels, prompts, diffs, credentials, environments, and terminal content are not displayed in rows. Session and window names render as `unknown`; numeric window indexes remain available because they are parsed typed metadata.
+- `daemon`: a loopback-only local daemon that polls fallback discovery, ingests structured hook/marker/structured-log evidence, reconciles it in memory, and exposes `/health`, `/state`, `/events`, and `/evidence`.
+- Authoritative waiting states from structured evidence only: `waiting_permission`, `waiting_plan_approval`, and `waiting_question`. Hook evidence outranks marker evidence, marker outranks structured-log evidence, higher sequence wins within a source, and `clear` removes an override. Exited or missing fallback panes win over waiting evidence.
+- Dashboard daemon-first refresh: when the loopback daemon is reachable, dashboard rows come from daemon `/state`; otherwise the dashboard falls back to the existing in-process discovery path.
+- Privacy-safe presentation: full paths, argv, procfs cmdlines, raw session/window labels, prompts, diffs, credentials, environments, terminal content, and non-agent panes are not displayed in rows. Session and window names render as `unknown`; numeric window indexes remain available because they are parsed typed metadata.
 
 Everything below remains **Planned — not implemented yet**.
 
@@ -73,9 +76,9 @@ The shipped basename hints for `opencode`, `codex`, `claude`, and `gemini` are o
 - `working`: shipped for live non-shell fallback evidence.
 - `unknown`: shipped for stale or incomplete fallback evidence.
 - `exited`: shipped for dead or missing pane fallback evidence.
-- `waiting_permission`: planned for authoritative hook/log evidence.
-- `waiting_plan_approval`: planned for authoritative hook/log evidence.
-- `waiting_question`: planned for authoritative hook/log evidence.
+- `waiting_permission`: shipped for structured authoritative hook, marker, or structured-log evidence.
+- `waiting_plan_approval`: shipped for structured authoritative hook, marker, or structured-log evidence.
+- `waiting_question`: shipped for structured authoritative hook, marker, or structured-log evidence.
 
 ### Dashboard Capabilities
 - Repository context beyond privacy-safe workspace labels.
@@ -89,17 +92,15 @@ The shipped basename hints for `opencode`, `codex`, `claude`, and `gemini` are o
 - Branch, worktree, and PR CI review status.
 
 ### Update Model
-- Event-first semantic updates.
-- Reconciliation after event delivery.
+- Event-first semantic updates for structured local evidence.
+- In-memory reconciliation after structured evidence delivery.
 - Adaptive preview polling tied to current activity.
 
 ### Discovery Beyond One-Shot Inspect
 - Cross-platform procfs-equivalent process discovery remains unimplemented.
-- Long-running daemon loop.
-- Polling or evented reconciliation.
+- Cross-platform procfs-equivalent process discovery remains unimplemented.
 - Process-tree discovery beyond the shipped Linux procfs basename hints.
-- Hooks, markers, structured logs, and terminal-content adapters.
-- HTTP/SSE transport for live UI rows.
+- Terminal-content adapters remain unimplemented.
 
 ### Security
 - Keep secrets out of the visible dashboard surface.

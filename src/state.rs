@@ -51,6 +51,15 @@ impl AgentSnapshot {
     pub fn agent_ids(&self) -> Vec<AgentId> {
         self.agents.keys().cloned().collect()
     }
+
+    pub(crate) fn from_agents(agents: impl IntoIterator<Item = Agent>) -> Self {
+        Self {
+            agents: agents
+                .into_iter()
+                .map(|agent| (agent.id().clone(), agent))
+                .collect(),
+        }
+    }
 }
 
 fn agent_id_for_lookup(id: &str) -> Option<AgentId> {

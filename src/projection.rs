@@ -8,6 +8,8 @@ use crate::model::{
 };
 use crate::state::AgentSnapshot;
 
+mod filter;
+
 const UNKNOWN: &str = "unknown";
 
 /// Presentation row shared by inspect and future dashboard rendering.
@@ -118,7 +120,11 @@ impl AgentProjectionRow {
 /// Project a normalized snapshot into deterministically ordered presentation rows.
 #[must_use]
 pub fn project_snapshot(snapshot: &AgentSnapshot) -> Vec<AgentProjectionRow> {
-    let mut rows = snapshot.agents().map(project_agent).collect::<Vec<_>>();
+    let mut rows = snapshot
+        .agents()
+        .map(project_agent)
+        .filter(filter::is_visible_agent_row)
+        .collect::<Vec<_>>();
     rows.sort_by(compare_rows);
     rows
 }
@@ -212,6 +218,9 @@ const fn evidence_source_name(source: EvidenceSource) -> &'static str {
         EvidenceSource::Tmux => "tmux",
         EvidenceSource::Process => "process",
         EvidenceSource::MissingPane => "missing_pane",
+        EvidenceSource::Hook => "hook",
+        EvidenceSource::Marker => "marker",
+        EvidenceSource::StructuredLog => "structured_log",
     }
 }
 
@@ -226,8 +235,12 @@ const fn evidence_confidence_name(confidence: EvidenceConfidence) -> &'static st
     match confidence {
         EvidenceConfidence::Low => "low",
         EvidenceConfidence::Medium => "medium",
+        EvidenceConfidence::High => "high",
     }
 }
+
+/// Header shared by inspect, daemon state, and dashboard daemon fallback.
+pub const HEADER: &str = "agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence";
 
 const fn client_confidence_name(candidate: ClientCandidate) -> &'static str {
     match candidate.confidence() {

@@ -3,8 +3,12 @@
 use std::io::IsTerminal;
 use std::io::{self, Write};
 
-use clap::{Parser, Subcommand};
+use std::net::SocketAddr;
+use std::time::Duration;
 
+use clap::{ArgAction, Args, Parser, Subcommand};
+
+use crate::daemon::{api::DEFAULT_DAEMON_ADDR, runner::DaemonConfig};
 use crate::inspect;
 use crate::runner;
 use crate::tmux::SystemTmuxCommand;
@@ -29,9 +33,35 @@ pub struct Cli {
 #[non_exhaustive]
 pub enum Command {
     /// Open the dashboard.
-    Dashboard,
+    Dashboard(DashboardArgs),
     /// Inspect current tmux-derived agent state once.
     Inspect,
+    /// Run the loopback-only live daemon.
+    Daemon(DaemonArgs),
+}
+
+/// Arguments for the dashboard command.
+#[derive(Clone, Copy, Debug, Args)]
+pub struct DashboardArgs {
+    /// Skip dashboard daemon autostart and use only an already-running daemon.
+    #[arg(long = "no-daemon", action = ArgAction::SetFalse, default_value_t = true)]
+    auto_start_daemon: bool,
+}
+
+impl DashboardArgs {
+    const fn default_dashboard() -> Self {
+        Self {
+            auto_start_daemon: true,
+        }
+    }
+}
+
+/// Arguments for the live daemon command.
+#[derive(Debug, Args)]
+pub struct DaemonArgs {
+    /// Loopback bind address for the local daemon API.
+    #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
+    bind: SocketAddr,
 }
 
 impl Cli {
@@ -46,13 +76,27 @@ impl Cli {
                     &mut stdout,
                 )
             }
-            None | Some(Command::Dashboard)
-                if io::stdin().is_terminal() && io::stdout().is_terminal() =>
-            {
-                runner::run_dashboard()?;
+            Some(Command::Daemon(args)) => {
+                let config = DaemonConfig::new(args.bind, Duration::from_secs(1));
+                crate::daemon::runner::run(config)?;
                 Ok(())
             }
-            None | Some(Command::Dashboard) => Ok(()),
+            None if io::stdin().is_terminal() && io::stdout().is_terminal() => {
+                let args = DashboardArgs::default_dashboard();
+                runner::run_dashboard_with_options(
+                    runner::DashboardOptions::from_auto_start_daemon(args.auto_start_daemon),
+                )?;
+                Ok(())
+            }
+            Some(Command::Dashboard(args))
+                if io::stdin().is_terminal() && io::stdout().is_terminal() =>
+            {
+                runner::run_dashboard_with_options(
+                    runner::DashboardOptions::from_auto_start_daemon(args.auto_start_daemon),
+                )?;
+                Ok(())
+            }
+            None | Some(Command::Dashboard(_)) => Ok(()),
         }
     }
 }

@@ -6,9 +6,11 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::app::{App, DashboardRow};
-use crate::daemon::DiscoveryService;
-use crate::tmux::SystemTmuxCommand;
-use crate::{input, input::KeyInput, projection, tui};
+use crate::{input, input::KeyInput, tui};
+
+mod discovery;
+
+use discovery::ProductionDiscovery;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_POLL_TIMEOUT: Duration = Duration::from_millis(100);
@@ -23,7 +25,52 @@ where
 
 /// Run the dashboard through Ratatui's terminal boundary.
 pub fn run_dashboard() -> io::Result<()> {
-    ratatui::run(|terminal| run_with(|| run_dashboard_loop(terminal)))
+    run_dashboard_with_options(DashboardOptions::default())
+}
+
+/// Run the dashboard through Ratatui's terminal boundary with explicit options.
+pub fn run_dashboard_with_options(options: DashboardOptions) -> io::Result<()> {
+    ratatui::run(|terminal| run_with(|| run_dashboard_loop(terminal, options)))
+}
+
+/// Dashboard runtime options.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct DashboardOptions {
+    daemon: DashboardDaemonMode,
+}
+
+impl DashboardOptions {
+    /// Create dashboard options from the CLI daemon autostart switch.
+    #[must_use]
+    pub const fn from_auto_start_daemon(auto_start_daemon: bool) -> Self {
+        let daemon = if auto_start_daemon {
+            DashboardDaemonMode::AutoStart
+        } else {
+            DashboardDaemonMode::ExistingOnly
+        };
+        Self { daemon }
+    }
+
+    pub(super) const fn daemon(self) -> DashboardDaemonMode {
+        self.daemon
+    }
+}
+
+impl Default for DashboardOptions {
+    fn default() -> Self {
+        Self::from_auto_start_daemon(true)
+    }
+}
+
+/// Dashboard daemon lifecycle mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum DashboardDaemonMode {
+    /// Spawn a dashboard-owned daemon only when the default endpoint is unreachable.
+    AutoStart,
+    /// Use an already-running daemon if it is available, but never spawn one.
+    ExistingOnly,
 }
 
 trait DashboardDiscovery {
@@ -62,9 +109,12 @@ fn advance_dashboard_event(app: &mut App, event: &Event) -> bool {
     }
 }
 
-fn run_dashboard_loop(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
+fn run_dashboard_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    options: DashboardOptions,
+) -> io::Result<()> {
     let mut app = App::new();
-    let mut discovery = ProductionDiscovery::new();
+    let mut discovery = ProductionDiscovery::new(options);
     let mut events = CrosstermEvents;
     let clock = SystemClock;
     let mut renderer = TerminalRenderer { terminal };
@@ -124,11 +174,11 @@ fn advance_dashboard_action(app: &mut App, event: &Event) -> Option<ActionOutcom
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => {
             match input::handle_key(map_key_input(key.code, key.modifiers)) {
-                Some(crate::app::Action::Quit) => {
-                    app.apply(crate::app::Action::Quit);
+                Some(crate::app::Action::Refresh) => Some(ActionOutcome::Refresh),
+                Some(action) => {
+                    app.apply(action);
                     None
                 }
-                Some(crate::app::Action::Refresh) => Some(ActionOutcome::Refresh),
                 None => None,
             }
         }
@@ -181,38 +231,24 @@ impl DashboardRenderer for TerminalRenderer<'_> {
     }
 }
 
-#[derive(Debug)]
-struct ProductionDiscovery {
-    service: DiscoveryService<SystemTmuxCommand>,
-}
-
-impl ProductionDiscovery {
-    fn new() -> Self {
-        Self {
-            service: DiscoveryService::new(SystemTmuxCommand),
-        }
-    }
-}
-
-impl DashboardDiscovery for ProductionDiscovery {
-    fn refresh(&mut self) -> io::Result<Vec<DashboardRow>> {
-        let snapshot = self.service.refresh().map_err(io::Error::other)?;
-        Ok(projection::project_snapshot(&snapshot)
-            .iter()
-            .map(DashboardRow::from_projection)
-            .collect())
-    }
-}
-
 const fn map_key_input(code: KeyCode, modifiers: KeyModifiers) -> KeyInput {
     match code {
         KeyCode::Char('q') if modifiers.is_empty() => KeyInput::Character('q'),
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => KeyInput::ControlC,
         KeyCode::Esc => KeyInput::Escape,
+        KeyCode::Up => KeyInput::Up,
+        KeyCode::Down => KeyInput::Down,
+        KeyCode::Home => KeyInput::Home,
+        KeyCode::End => KeyInput::End,
+        KeyCode::PageUp => KeyInput::PageUp,
+        KeyCode::PageDown => KeyInput::PageDown,
         KeyCode::Char(ch) => KeyInput::Character(ch),
         _ => KeyInput::Other,
     }
 }
+
+#[cfg(test)]
+mod autostart_tests;
 
 #[cfg(test)]
 mod test_support;

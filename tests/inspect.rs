@@ -35,12 +35,12 @@ fn live_row(
 }
 
 #[test]
-fn given_reversed_tmux_rows_when_inspected_then_output_is_deterministically_sorted() {
+fn given_reversed_tmux_rows_when_inspected_then_non_agent_rows_are_filtered() {
     // Given: tmux returns panes in reverse display order through the injected seam.
     let tmux_output = format!(
         "{}\n{}\n",
-        live_row("1", "api", "%2", "/tmp/api", "python"),
-        live_row("0", "shell", "%1", "/tmp/shell", "bash"),
+        live_row("1", "api", "%2", "/tmp/api", "codex"),
+        live_row("0", "shell", "%1", "/tmp/shell", "codex"),
     );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let calls = command.calls();
@@ -49,26 +49,22 @@ fn given_reversed_tmux_rows_when_inspected_then_output_is_deterministically_sort
     // When: inspect runs once.
     run_inspect(command, &mut stdout).expect("inspect succeeds");
 
-    // Then: stdout is stable, sorted by agent id, and tmux was called once.
+    // Then: stdout omits tmux-only non-agent panes, and tmux was called once.
     assert_eq!(calls.borrow().len(), 1);
     assert_eq!(
         String::from_utf8(stdout).expect("stdout is utf8"),
-        "agentmux inspect\n\
-agents: 2\n\
-agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%1\tunknown\t0\tunknown\t%1\tunknown\tunknown\tunknown\tunknown\tshell\tidle\ttmux\tfresh\tlow\n\
-pane:%2\tunknown\t1\tunknown\t%2\tunknown\tunknown\tunknown\tunknown\tapi\tworking\ttmux\tfresh\tlow\n"
+        "agentmux inspect\nagents: 0\nno agents discovered from tmux panes\n"
     );
 }
 
 #[test]
-fn given_multi_digit_pane_ids_when_inspected_then_output_is_sorted_by_pane_number() {
+fn given_multi_digit_pane_ids_when_inspected_then_non_agent_rows_are_filtered() {
     // Given: tmux returns multi-digit pane IDs before single-digit pane IDs.
     let tmux_output = format!(
         "{}\n{}\n{}\n",
-        live_row("0", "ten", "%10", "/tmp/ten", "bash"),
-        live_row("9", "two", "%2", "/tmp/two", "bash"),
-        live_row("5", "one", "%1", "/tmp/one", "bash"),
+        live_row("0", "ten", "%10", "/tmp/ten", "codex"),
+        live_row("9", "two", "%2", "/tmp/two", "codex"),
+        live_row("5", "one", "%1", "/tmp/one", "codex"),
     );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let mut stdout = Vec::new();
@@ -76,28 +72,23 @@ fn given_multi_digit_pane_ids_when_inspected_then_output_is_sorted_by_pane_numbe
     // When: inspect runs once.
     run_inspect(command, &mut stdout).expect("inspect succeeds");
 
-    // Then: rows render in numeric pane order, not lexicographic agent-id order.
+    // Then: tmux-only non-agent panes are omitted before presentation.
     assert_eq!(
         String::from_utf8(stdout).expect("stdout is utf8"),
-        "agentmux inspect\n\
-agents: 3\n\
-agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%1\tunknown\t5\tunknown\t%1\tunknown\tunknown\tunknown\tunknown\tone\tidle\ttmux\tfresh\tlow\n\
-pane:%2\tunknown\t9\tunknown\t%2\tunknown\tunknown\tunknown\tunknown\ttwo\tidle\ttmux\tfresh\tlow\n\
-pane:%10\tunknown\t0\tunknown\t%10\tunknown\tunknown\tunknown\tunknown\tten\tidle\ttmux\tfresh\tlow\n"
+        "agentmux inspect\nagents: 0\nno agents discovered from tmux panes\n"
     );
 }
 
 #[test]
-fn given_leading_zero_pane_ids_when_inspected_then_output_is_sorted_by_numeric_magnitude() {
+fn given_leading_zero_pane_ids_when_inspected_then_non_agent_rows_are_filtered() {
     // Given: tmux returns leading-zero pane IDs around canonical forms.
     let tmux_output = format!(
         "{}\n{}\n{}\n{}\n{}\n",
-        live_row("10", "ten", "%10", "/tmp/ten", "bash"),
-        live_row("2", "two-a", "%0002", "/tmp/two-a", "bash"),
-        live_row("2", "two-b", "%2", "/tmp/two-b", "bash"),
-        live_row("0", "zero-a", "%0000", "/tmp/zero-a", "bash"),
-        live_row("0", "zero-b", "%0", "/tmp/zero-b", "bash"),
+        live_row("10", "ten", "%10", "/tmp/ten", "codex"),
+        live_row("2", "two-a", "%0002", "/tmp/two-a", "codex"),
+        live_row("2", "two-b", "%2", "/tmp/two-b", "codex"),
+        live_row("0", "zero-a", "%0000", "/tmp/zero-a", "codex"),
+        live_row("0", "zero-b", "%0", "/tmp/zero-b", "codex"),
     );
     let command = FakeTmuxCommand::new(Ok(tmux_output));
     let mut stdout = Vec::new();
@@ -105,17 +96,10 @@ fn given_leading_zero_pane_ids_when_inspected_then_output_is_sorted_by_numeric_m
     // When: inspect runs once.
     run_inspect(command, &mut stdout).expect("inspect succeeds");
 
-    // Then: significant digits define magnitude, with raw suffix as deterministic tie-breaker.
+    // Then: tmux-only non-agent panes are omitted before presentation.
     assert_eq!(
         String::from_utf8(stdout).expect("stdout is utf8"),
-        "agentmux inspect\n\
-agents: 5\n\
-agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%0\tunknown\t0\tunknown\t%0\tunknown\tunknown\tunknown\tunknown\tzero-b\tidle\ttmux\tfresh\tlow\n\
-pane:%0000\tunknown\t0\tunknown\t%0000\tunknown\tunknown\tunknown\tunknown\tzero-a\tidle\ttmux\tfresh\tlow\n\
-pane:%2\tunknown\t2\tunknown\t%2\tunknown\tunknown\tunknown\tunknown\ttwo-b\tidle\ttmux\tfresh\tlow\n\
-pane:%0002\tunknown\t2\tunknown\t%0002\tunknown\tunknown\tunknown\tunknown\ttwo-a\tidle\ttmux\tfresh\tlow\n\
-pane:%10\tunknown\t10\tunknown\t%10\tunknown\tunknown\tunknown\tunknown\tten\tidle\ttmux\tfresh\tlow\n"
+        "agentmux inspect\nagents: 0\nno agents discovered from tmux panes\n"
     );
 }
 
@@ -132,13 +116,10 @@ fn given_dead_tmux_row_when_inspected_then_dead_evidence_is_medium_confidence() 
     // When: inspect runs once.
     run_inspect(command, &mut stdout).expect("inspect succeeds");
 
-    // Then: stdout reports exited state with medium-confidence tmux evidence.
+    // Then: dead non-agent panes are omitted from presentation output.
     assert_eq!(
         String::from_utf8(stdout).expect("stdout is utf8"),
-        "agentmux inspect\n\
-agents: 1\n\
-agent_id\tsession_name\twindow_index\twindow_name\tpane_id\tpid\tprocess_name\tclient\tclient_confidence\tworkspace\tstate\tevidence_source\tevidence_freshness\tevidence_confidence\n\
-pane:%1\tunknown\t0\tunknown\t%1\tunknown\tunknown\tunknown\tunknown\tapi\texited\ttmux\tfresh\tmedium\n"
+        "agentmux inspect\nagents: 0\nno agents discovered from tmux panes\n"
     );
 }
 

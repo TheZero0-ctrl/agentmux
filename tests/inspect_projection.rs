@@ -81,11 +81,13 @@ fn given_sensitive_tmux_values_when_inspected_then_output_uses_safe_labels() {
     // When: inspect writes its successful row.
     run_inspect(command, &mut stdout).expect("inspect succeeds");
 
-    // Then: stdout never exposes the full private cwd and still has the exact enriched schema.
+    // Then: stdout never exposes private values and non-agent panes are omitted.
     let stdout = String::from_utf8(stdout).expect("stdout is utf8");
-    assert!(stdout.contains(EXPECTED_INSPECT_HEADER));
-    assert!(stdout.contains("pane:%1\tunknown\t0\tunknown\t%1"));
-    assert!(stdout.contains("\tprivate-repo\t"));
+    assert!(stdout.contains("agents: 0"));
+    assert!(stdout.contains("no agents discovered from tmux panes"));
+    assert!(!stdout.contains(EXPECTED_INSPECT_HEADER));
+    assert!(!stdout.contains("pane:%1\tunknown\t0\tunknown\t%1"));
+    assert!(!stdout.contains("\tprivate-repo\t"));
     assert!(!stdout.contains(secret_path));
     assert!(!stdout.contains("/home/alice"));
     assert!(!stdout.contains("prompt"));
@@ -97,6 +99,58 @@ fn given_sensitive_tmux_values_when_inspected_then_output_uses_safe_labels() {
             .lines()
             .all(|line| !line.contains('\t') || line.split('\t').count() == 14)
     );
+}
+
+#[test]
+fn given_multi_digit_pane_ids_when_projected_then_rows_are_sorted_by_pane_number()
+-> Result<(), ModelError> {
+    // Given: agent rows arrive with multi-digit pane IDs before single-digit pane IDs.
+    let snapshot = normalize_snapshot(
+        &AgentSnapshot::default(),
+        [
+            pane_with_metadata("%10", codex_metadata()?)?,
+            pane_with_metadata("%2", codex_metadata()?)?,
+            pane_with_metadata("%1", codex_metadata()?)?,
+        ],
+    );
+
+    // When: the shared projection creates inspect/dashboard rows.
+    let rows = project_snapshot(&snapshot);
+
+    // Then: rows render in numeric pane order, not lexicographic agent-id order.
+    let pane_ids = rows
+        .iter()
+        .map(agentmux::projection::AgentProjectionRow::pane_id)
+        .collect::<Vec<_>>();
+    assert_eq!(pane_ids, ["%1", "%2", "%10"]);
+    Ok(())
+}
+
+#[test]
+fn given_leading_zero_pane_ids_when_projected_then_rows_are_sorted_by_numeric_magnitude()
+-> Result<(), ModelError> {
+    // Given: agent rows arrive with leading-zero pane IDs around canonical forms.
+    let snapshot = normalize_snapshot(
+        &AgentSnapshot::default(),
+        [
+            pane_with_metadata("%10", codex_metadata()?)?,
+            pane_with_metadata("%0002", codex_metadata()?)?,
+            pane_with_metadata("%2", codex_metadata()?)?,
+            pane_with_metadata("%0000", codex_metadata()?)?,
+            pane_with_metadata("%0", codex_metadata()?)?,
+        ],
+    );
+
+    // When: the shared projection creates inspect/dashboard rows.
+    let rows = project_snapshot(&snapshot);
+
+    // Then: significant digits define magnitude, with raw suffix as deterministic tie-breaker.
+    let pane_ids = rows
+        .iter()
+        .map(agentmux::projection::AgentProjectionRow::pane_id)
+        .collect::<Vec<_>>();
+    assert_eq!(pane_ids, ["%0", "%0000", "%2", "%0002", "%10"]);
+    Ok(())
 }
 
 #[test]
@@ -152,6 +206,14 @@ fn pane_with_metadata(
         ProcessEvidence::live(777, "codex"),
     )
     .with_process_metadata(process_metadata))
+}
+
+fn codex_metadata() -> Result<ProcessMetadata, ModelError> {
+    Ok(ProcessMetadata::new(
+        Some(ProcessIdentity::new(777, 12_345)),
+        Some(ProcessBasename::new("codex")?),
+        ClientCandidate::known(ClientKind::Codex, ClientConfidence::Low),
+    ))
 }
 
 struct FakeTmuxCommand {

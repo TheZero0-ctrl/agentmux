@@ -55,6 +55,37 @@ fn given_help_flag_when_invoked_then_stdout_mentions_inspect() -> Result<(), Box
 }
 
 #[test]
+fn given_help_flag_when_invoked_then_stdout_mentions_daemon() -> Result<(), Box<dyn Error>> {
+    // Given: the compiled CLI binary.
+    let mut command = Command::cargo_bin("agentmux")?;
+
+    // When: top-level help is requested.
+    let assert = command.arg("--help").assert();
+
+    // Then: the loopback daemon command is discoverable.
+    assert
+        .success()
+        .stdout(contains("Run the loopback-only live daemon"));
+    Ok(())
+}
+
+#[test]
+fn given_daemon_help_when_invoked_then_stdout_mentions_loopback_bind() -> Result<(), Box<dyn Error>>
+{
+    // Given: the compiled CLI binary.
+    let mut command = Command::cargo_bin("agentmux")?;
+
+    // When: daemon help is requested.
+    let assert = command.args(["daemon", "--help"]).assert();
+
+    // Then: the daemon command exposes its loopback bind option and exits successfully.
+    assert
+        .success()
+        .stdout(contains("--bind").and(contains("127.0.0.1:47631")));
+    Ok(())
+}
+
+#[test]
 fn given_dashboard_command_when_invoked_then_process_exits_successfully()
 -> Result<(), Box<dyn Error>> {
     // Given: the compiled CLI binary.

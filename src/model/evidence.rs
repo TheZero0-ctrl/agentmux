@@ -8,6 +8,12 @@ pub enum EvidenceSource {
     Process,
     /// Evidence came from a pane that disappeared from the latest snapshot.
     MissingPane,
+    /// Evidence came from an agent hook event.
+    Hook,
+    /// Evidence came from an explicit marker event.
+    Marker,
+    /// Evidence came from a structured log event.
+    StructuredLog,
 }
 
 /// Whether evidence is fresh enough to infer a state.
@@ -28,6 +34,8 @@ pub enum EvidenceConfidence {
     Low,
     /// Evidence is specific enough to mark absence or exit.
     Medium,
+    /// Evidence is authoritative for the current daemon revision.
+    High,
 }
 
 /// Evidence metadata attached to a normalized state.

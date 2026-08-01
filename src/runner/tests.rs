@@ -5,6 +5,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, DashboardRow};
 
+use super::discovery::FallbackDiscovery;
 use super::test_support::{
     FakeClock, FakeDiscovery, FakeEvents, FakePoll, FakeRenderer, key_event,
 };
@@ -48,6 +49,38 @@ fn given_resize_event_when_advanced_then_app_keeps_running() {
     // Then: the app keeps running and the loop continues.
     assert!(app.is_running());
     assert!(continue_running);
+}
+
+#[test]
+fn given_navigation_key_event_when_advanced_then_selection_moves() {
+    // Given: a running dashboard with selectable rows.
+    let mut app = App::new();
+    app.replace_rows(vec![
+        DashboardRow::for_test("pane:%1"),
+        DashboardRow::for_test("pane:%2"),
+    ]);
+    let event = Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+    // When: the runner advances one navigation event.
+    let continue_running = advance_dashboard_event(&mut app, &event);
+
+    // Then: the app remains running and selection moves.
+    assert!(continue_running);
+    assert_eq!(app.selected_index(), Some(1));
+}
+
+#[test]
+fn given_help_key_event_when_advanced_then_help_visibility_toggles() {
+    // Given: a running dashboard with hidden help.
+    let mut app = App::new();
+    let event = Event::Key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+
+    // When: the runner advances one help event.
+    let continue_running = advance_dashboard_event(&mut app, &event);
+
+    // Then: the app remains running and help is visible.
+    assert!(continue_running);
+    assert!(app.is_help_visible());
 }
 
 #[test]
@@ -163,6 +196,43 @@ fn given_refresh_failure_when_loop_runs_then_last_rows_are_retained_with_degrade
     assert_eq!(app.rows(), &[DashboardRow::for_test("pane:%1")]);
     assert_eq!(app.degraded_message(), Some("dashboard refresh degraded"));
     Ok(())
+}
+
+#[test]
+fn given_daemon_rows_available_when_dashboard_refreshes_then_fallback_discovery_is_not_used() {
+    // Given: daemon discovery returns a privacy-safe row and local discovery has a different row.
+    let daemon_rows = vec![DashboardRow::for_test("pane:%9")];
+    let local_rows = vec![DashboardRow::for_test("pane:%1")];
+    let primary = FakeDiscovery::new([Ok(daemon_rows.clone())]);
+    let fallback = FakeDiscovery::new([Ok(local_rows)]);
+    let mut discovery = FallbackDiscovery::new(primary, fallback);
+
+    // When: the dashboard refreshes through daemon-first discovery.
+    let rows = discovery.refresh().expect("daemon rows are accepted");
+
+    // Then: daemon rows win and local fallback is not consumed.
+    assert_eq!(rows, daemon_rows);
+    assert_eq!(discovery.primary.calls, 1);
+    assert_eq!(discovery.fallback.calls, 0);
+}
+
+#[test]
+fn given_daemon_unavailable_when_dashboard_refreshes_then_local_discovery_is_used() {
+    // Given: daemon discovery fails and local discovery can still produce existing rows.
+    let local_rows = vec![DashboardRow::for_test("pane:%1")];
+    let primary = FakeDiscovery::new([Err(io::Error::other("daemon unavailable"))]);
+    let fallback = FakeDiscovery::new([Ok(local_rows.clone())]);
+    let mut discovery = FallbackDiscovery::new(primary, fallback);
+
+    // When: the dashboard refreshes through daemon-first discovery.
+    let rows = discovery
+        .refresh()
+        .expect("local fallback rows are accepted");
+
+    // Then: the existing in-process discovery path preserves the dashboard surface.
+    assert_eq!(rows, local_rows);
+    assert_eq!(discovery.primary.calls, 1);
+    assert_eq!(discovery.fallback.calls, 1);
 }
 
 #[test]

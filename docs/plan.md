@@ -1,6 +1,6 @@
 # agentmux Implementation Plan
 
-This plan is derived from the approved spec and architecture docs. The foundation and local discovery dashboard milestone are already in place; future phases remain below.
+This plan is derived from the approved spec and architecture docs. The foundation, local discovery dashboard, and loopback daemon state/API vertical slice are already in place; future phases remain below.
 
 ## Phase 1: Foundation
 
@@ -15,10 +15,10 @@ This plan is derived from the approved spec and architecture docs. The foundatio
 - Status: implemented as a local discovery milestone. It includes typed fallback state, strict
   `tmux list-panes` parsing, Linux procfs process-tree evidence, exact-basename low-confidence
   candidates for `opencode`, `codex`, `claude`, and `gemini`, privacy-safe workspace labels,
-  in-memory missing/stale handling, a shared inspect/dashboard row projection, a shipped one-shot
+  in-memory missing/stale handling, a shared filtered inspect/dashboard agent-row projection, a shipped one-shot
   `agentmux inspect` command, and a synchronous in-process Ratatui dashboard refresh loop.
-  Cross-platform process discovery, authoritative adapters, waiting-state detection, HTTP/SSE,
-  daemon loops, persistence, previews/actions, and Git / PR enrichment remain future work.
+  Cross-platform process discovery, client-specific authoritative adapters, persistence,
+  previews/actions, search, and Git / PR enrichment remain future work.
 - Depends on: foundation shell, daemon boundary, and a state model that can represent live processes and panes.
 - Entry criteria: the project can observe tmux panes and related process evidence without UI code reaching into tmux directly.
 - Exit criteria: tmux and Linux procfs evidence feed a structured state model; `agentmux inspect`
@@ -31,16 +31,16 @@ This plan is derived from the approved spec and architecture docs. The foundatio
 
 ## Phase 3: hooks/log adapters
 
-- Status: future. The shipped procfs/tmux evidence does not infer waiting states or exact identity.
+- Status: partially implemented. Structured hook, marker, and structured-log evidence can assert waiting states through the daemon `/evidence` endpoint. Client-specific adapters, log replay, and exact identity remain future.
 - Depends on: process/state model, source precedence rules, and a collector boundary for external evidence.
 - Entry criteria: hook events, markers, and structured logs have a place to land in the state pipeline.
-- Exit criteria: hooks and log adapters produce normalized events that can be ranked alongside other evidence.
+- Exit criteria: hooks and log adapters produce normalized events that can be ranked alongside other evidence. The current slice ships the normalized ingestion and precedence core, not adapter-specific collectors.
 - Tests: adapter parsing tests, precedence tests for conflicting sources, fixture-based log replay tests.
 - Risks: log format drift, incomplete adapter coverage, and incorrect precedence when sources disagree.
 
 ## Phase 4: daemon/SSE/reconciliation
 
-- Status: future. The shipped dashboard refreshes synchronously in-process and does not expose HTTP/SSE.
+- Status: partially implemented. The shipped daemon binds only to loopback, exposes `/health`, `/state`, `/events`, and `/evidence`, folds structured evidence in memory, and the dashboard falls back to in-process discovery when the daemon is unavailable. Persistence, authentication, multi-client transport hardening, and rich reconciliation remain future.
 - Depends on: normalized event ingestion, state reducer, and authoritative-source precedence.
 - Entry criteria: the daemon can accept commands and publish semantic updates from the reducer.
 - Exit criteria: loopback HTTP plus SSE surface live state, and reconciliation corrects stale or ambiguous state.
