@@ -14,12 +14,11 @@ fn given_sensitive_session_window_labels_when_rendered_then_raw_metadata_is_abse
     // When: the dashboard is rendered.
     let rendered = rendered_text(&app, 140, 12)?;
 
-    // Then: forbidden fixture strings are absent while safe location text remains.
+    // Then: forbidden fixture strings are absent from the pane surface.
     assert!(!rendered.contains("prompt"));
     assert!(!rendered.contains("sk-live-secret"));
     assert!(!rendered.contains("diff --git"));
     assert!(!rendered.contains("raw stderr"));
-    assert!(rendered.contains("unknown:0 unknown"));
-    assert!(rendered.contains("%1"));
+    assert!(rendered.contains("pane content unavailable"));
     Ok(())
 }

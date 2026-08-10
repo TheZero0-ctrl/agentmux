@@ -49,10 +49,10 @@ This plan is derived from the approved spec and architecture docs. The foundatio
 
 ## Phase 5: preview/action
 
-- Status: future. The shipped dashboard is read-only and has no preview or act-in-place command surface.
+- Status: partially implemented. The shipped dashboard has a toggleable project-grouped agent sidebar, a responsive single-agent main preview, local tmux pane-text capture, and focused-pane keyboard forwarding behind explicit `i` input mode. Richer act-in-place actions remain future.
 - Depends on: daemon API, live state selection, and a defined action boundary.
-- Entry criteria: the UI can select an item and ask for a detail preview or a scoped action.
-- Exit criteria: preview content is shown for the focused item, and act-in-place actions reach the daemon.
+- Entry criteria: the UI can select an item and ask for a detail preview or a scoped action. Sidebar selection and the focused agent preview are shipped.
+- Exit criteria: live agent content is shown for focused items, and act-in-place actions reach the daemon. Both real content and action halves remain future.
 - Tests: action dispatch tests, preview rendering tests, failure-path tests for missing or stale selections.
 - Risks: leaking private content into the preview, ambiguous focus handling, and action surfaces that drift from state.
 

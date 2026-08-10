@@ -20,6 +20,9 @@ pub(super) fn render(frame: &mut Frame<'_>, area: Rect) {
         Line::from("home/end jump"),
         Line::from("page up/down move"),
         Line::from("r refresh | q quit"),
+        Line::from("j/k select | tab/i focus input | s sidebar"),
+        Line::from("enter/o switch to selected tmux pane (dashboard stays running)"),
+        Line::from("esc stop input"),
         Line::from(Span::styled("labels hidden for privacy", muted_style())),
     ];
     frame.render_widget(Clear, area);
@@ -30,9 +33,9 @@ fn centered_rect(area: Rect) -> Option<Rect> {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(20),
-            Constraint::Percentage(60),
-            Constraint::Percentage(20),
+            Constraint::Percentage(10),
+            Constraint::Percentage(80),
+            Constraint::Percentage(10),
         ])
         .split(area);
     let [_, middle, _] = vertical.as_ref() else {

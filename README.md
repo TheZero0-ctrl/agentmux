@@ -13,9 +13,10 @@ agentmux is the terminal dashboard for coding-agent workflows.
 - Unknown semantics: missing, degraded, conflicting, generic, lookalike, or incomplete process evidence stays `unknown`
 - Conservative states: live shell, live command, stale, dead, and missing pane evidence map to safe fallback states; waiting states are accepted only from structured hook, marker, or structured-log evidence
 - Live daemon: `agentmux daemon` binds to loopback only, accepts structured evidence, overlays authoritative waiting states onto fallback discovery, and exposes privacy-safe `/health`, `/state`, `/events`, and `/evidence`
-- Dashboard refresh and navigation: synchronous in-process initial refresh, automatic refresh every second, manual `r` / `R` refresh, row selection with `j` / `k`, arrows, Home/End, PageUp/PageDown, help with `?` / `h`, and quit controls `q`, Esc, and Ctrl-C
+- Dashboard refresh and navigation: synchronous in-process initial refresh, automatic refresh every second, manual `r` / `R` refresh, row selection with `j` / `k`, arrows, Home/End, PageUp/PageDown, project-grouped sidebar with `s`, help with `?` / `h`, live preview input focus with `Tab` / `i`, switching to the selected real tmux pane with `Enter` / `o`, and quit controls `q`, Esc, and Ctrl-C
+- Live preview: the selected agent renders its current tmux pane text, refreshed with the dashboard projection; unavailable panes show an empty-content fallback without degrading discovery. Press `i` to forward keyboard input to the focused pane, `o` to switch the tmux client to the focused agent's real pane while leaving agentmux running, and `Esc` to leave input mode.
 - Degraded behavior: refresh failures keep the last good dashboard rows and show a sanitized degraded message
-- Privacy boundary: rows display sanitized workspace basenames and executable basenames only; full paths, argv, prompts, diffs, credentials, terminal content, and procfs cmdlines are not displayed or retained in presentation rows
+- Privacy boundary: rows display sanitized workspace basenames and executable basenames only; full paths, argv, credentials, and procfs cmdlines are not displayed or retained in presentation rows. Pane text is captured only for visible local tiles and is not retained in daemon state.
 
 ## Commands
 
@@ -30,16 +31,16 @@ agentmux is the terminal dashboard for coding-agent workflows.
 
 ## Dashboard
 
-`agentmux dashboard` opens a ccmux-inspired local dashboard with a header/status area, responsive main area, and compact footer controls.
+`agentmux dashboard` opens a local dashboard with a header/status area, responsive main area, and compact footer controls.
 
 - Wide terminals show a privacy-safe agent list plus a detail panel for the selected row.
 - Medium terminals show a single list with safe location, workspace, process, and evidence metadata.
 - Narrow terminals collapse to compact essentials: client, state, and safe pane location.
 - Empty and degraded states are explicit; degraded refreshes keep the last good rows.
 - Selection follows keyboard navigation and scrolls the visible list when the selected row moves outside the viewport.
-- Footer hints show the shipped controls: `j` / `k` or arrows select, `?` / `h` help, `r` / `R` refresh, and `q` quit.
+- The sidebar lists discovered agents grouped by sanitized project/workspace name. `s` toggles the sidebar; `j` / `k` selection controls the single full-area live preview.
 
-The dashboard does not render raw tmux session names, raw window names, terminal content, prompts, diffs, argv, full paths, credentials, or raw command stderr.
+The dashboard does not render raw tmux session names, raw window names, argv, full paths, credentials, or raw command stderr. The selected tmux pane text is rendered in the full-area preview.
 
 In an interactive terminal, `agentmux dashboard` checks `GET /health` on `127.0.0.1:47631`. If a healthy daemon is already running, the dashboard uses it without owning or stopping it. If the endpoint is unreachable, the dashboard starts the current executable as `agentmux daemon --bind 127.0.0.1:47631`, owns only that child process, and stops/reaps that child when the dashboard exits. If the endpoint is occupied by an invalid listener, the dashboard does not spawn over it.
 
@@ -92,7 +93,7 @@ no agents discovered from tmux panes
 
 ## Roadmap
 
-The roadmap is tracked in `docs/plan.md`. Shipped local discovery now includes the loopback daemon state/API vertical slice. Preview/actions, search, Git/PR enrichment, cross-platform discovery, adapter-specific identity, durable persistence, and cross-session persistence remain future work.
+The roadmap is tracked in `docs/plan.md`. Shipped local discovery now includes the loopback daemon state/API vertical slice, project-grouped agent sidebar, focused main preview, and local tmux pane-text capture. Act-in-place actions, search, Git/PR enrichment, cross-platform discovery, adapter-specific identity, durable persistence, and cross-session persistence remain future work.
 
 1. Foundation
 2. tmux/Linux procfs discovery + state

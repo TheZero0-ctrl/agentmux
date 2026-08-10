@@ -1,5 +1,6 @@
 //! Dashboard runner boundary for agentmux.
 
+use std::collections::BTreeSet;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -75,6 +76,21 @@ pub enum DashboardDaemonMode {
 
 trait DashboardDiscovery {
     fn refresh(&mut self) -> io::Result<Vec<DashboardRow>>;
+
+    fn refresh_visible(
+        &mut self,
+        _visible_agent_ids: &BTreeSet<String>,
+    ) -> io::Result<Vec<DashboardRow>> {
+        self.refresh()
+    }
+
+    fn forward_key(&mut self, _pane_id: &str, _event: &Event) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn switch_client_to_pane(&mut self, _pane_id: &str) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 trait Clock {
@@ -152,9 +168,34 @@ where
         }
 
         let event = events.read()?;
-        if advance_dashboard_action(app, &event) == Some(ActionOutcome::Refresh) {
-            refresh_app(app, discovery);
-            next_refresh = next_refresh_after(clock.now());
+        if app.is_input_mode() {
+            if is_escape_key(&event) {
+                app.apply(crate::app::Action::ToggleInputMode);
+            } else if let Some(row) = app.selected_row() {
+                if discovery.forward_key(row.pane_id(), &event).is_ok() {
+                    refresh_app(app, discovery);
+                    next_refresh = next_refresh_after(clock.now());
+                } else {
+                    app.mark_degraded();
+                }
+            }
+            continue;
+        }
+        match advance_dashboard_action(app, &event) {
+            Some(ActionOutcome::Refresh) => {
+                refresh_app(app, discovery);
+                next_refresh = next_refresh_after(clock.now());
+            }
+            Some(ActionOutcome::SwitchClientToPane(pane_id)) => {
+                if discovery.switch_client_to_pane(&pane_id).is_ok() {
+                    // Leave agentmux running in its original pane. The tmux
+                    // client now shows the selected real pane, and the user
+                    // can return to this dashboard with normal tmux navigation.
+                } else {
+                    app.mark_degraded();
+                }
+            }
+            None => {}
         }
 
         if !app.is_running() {
@@ -163,6 +204,14 @@ where
     }
 
     Ok(())
+}
+
+fn is_escape_key(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Key(key)
+            if key.kind == KeyEventKind::Press && key.code == KeyCode::Esc
+    )
 }
 
 fn next_refresh_after(now: Instant) -> Instant {
@@ -175,6 +224,20 @@ fn advance_dashboard_action(app: &mut App, event: &Event) -> Option<ActionOutcom
         Event::Key(key) if key.kind == KeyEventKind::Press => {
             match input::handle_key(map_key_input(key.code, key.modifiers)) {
                 Some(crate::app::Action::Refresh) => Some(ActionOutcome::Refresh),
+                Some(crate::app::Action::OpenSelectedPane) => app
+                    .selected_row()
+                    .map(|row| ActionOutcome::SwitchClientToPane(row.pane_id().to_owned())),
+                Some(
+                    action @ (crate::app::Action::SelectNext
+                    | crate::app::Action::SelectPrevious
+                    | crate::app::Action::SelectFirst
+                    | crate::app::Action::SelectLast
+                    | crate::app::Action::PageNext
+                    | crate::app::Action::PagePrevious),
+                ) => {
+                    app.apply(action);
+                    Some(ActionOutcome::Refresh)
+                }
                 Some(action) => {
                     app.apply(action);
                     None
@@ -187,15 +250,22 @@ fn advance_dashboard_action(app: &mut App, event: &Event) -> Option<ActionOutcom
 }
 
 fn refresh_app(app: &mut App, discovery: &mut impl DashboardDiscovery) {
-    match discovery.refresh() {
+    let visible_agent_ids = app.selected_preview_agent_ids();
+    let result = if app.rows().is_empty() {
+        discovery.refresh()
+    } else {
+        discovery.refresh_visible(&visible_agent_ids)
+    };
+    match result {
         Ok(rows) => app.replace_rows(rows),
         Err(_) => app.mark_degraded(),
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ActionOutcome {
     Refresh,
+    SwitchClientToPane(String),
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -234,6 +304,8 @@ impl DashboardRenderer for TerminalRenderer<'_> {
 const fn map_key_input(code: KeyCode, modifiers: KeyModifiers) -> KeyInput {
     match code {
         KeyCode::Char('q') if modifiers.is_empty() => KeyInput::Character('q'),
+        KeyCode::Tab => KeyInput::Tab,
+        KeyCode::Enter => KeyInput::Enter,
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => KeyInput::ControlC,
         KeyCode::Esc => KeyInput::Escape,
         KeyCode::Up => KeyInput::Up,

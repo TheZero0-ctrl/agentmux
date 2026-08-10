@@ -98,6 +98,14 @@ fn given_help_action_when_applied_then_help_visibility_toggles() {
 }
 
 #[test]
+fn given_sidebar_when_toggled_then_sidebar_visibility_changes() {
+    let mut app = App::new();
+    assert!(app.is_sidebar_visible());
+    app.apply(Action::ToggleSidebar);
+    assert!(!app.is_sidebar_visible());
+}
+
+#[test]
 fn given_existing_rows_when_refresh_degrades_then_rows_are_retained_with_safe_message() {
     // Given: previously populated dashboard rows.
     let mut app = App::new();
@@ -128,6 +136,8 @@ impl DashboardRow {
             evidence_source: "tmux".to_owned(),
             evidence_freshness: "fresh".to_owned(),
             evidence_confidence: "low".to_owned(),
+            content: String::new(),
+            rendered_content: None,
         }
     }
 
@@ -175,6 +185,11 @@ impl DashboardRow {
         self.evidence_source = source.to_owned();
         self.evidence_freshness = freshness.to_owned();
         self.evidence_confidence = confidence.to_owned();
+        self
+    }
+
+    pub(crate) fn with_content(mut self, content: &str) -> Self {
+        self.set_content(content.to_owned());
         self
     }
 }

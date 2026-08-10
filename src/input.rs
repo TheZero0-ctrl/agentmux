@@ -24,6 +24,10 @@ pub enum KeyInput {
     PageUp,
     /// The `PageDown` key.
     PageDown,
+    /// The Tab key.
+    Tab,
+    /// The Enter key.
+    Enter,
     /// Any other key.
     Other,
 }
@@ -40,6 +44,9 @@ pub const fn handle_key(input: KeyInput) -> Option<Action> {
         KeyInput::PageDown => Some(Action::PageNext),
         KeyInput::PageUp => Some(Action::PagePrevious),
         KeyInput::Character('?' | 'h') => Some(Action::ToggleHelp),
+        KeyInput::Tab | KeyInput::Character('i') => Some(Action::ToggleInputMode),
+        KeyInput::Character('s' | 'S') => Some(Action::ToggleSidebar),
+        KeyInput::Enter | KeyInput::Character('o') => Some(Action::OpenSelectedPane),
         KeyInput::Character(_) | KeyInput::Other => None,
     }
 }
@@ -137,6 +144,15 @@ mod tests {
         assert_eq!(
             handle_key(KeyInput::Character('h')),
             Some(Action::ToggleHelp)
+        );
+    }
+
+    #[test]
+    fn given_sidebar_and_input_keys_when_handled_then_actions_are_returned() {
+        assert_eq!(handle_key(KeyInput::Tab), Some(Action::ToggleInputMode));
+        assert_eq!(
+            handle_key(KeyInput::Character('s')),
+            Some(Action::ToggleSidebar)
         );
     }
 }

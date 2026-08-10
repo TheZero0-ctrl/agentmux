@@ -2,7 +2,7 @@
 
 ## 1. Atmosphere & Identity
 
-agentmux should feel like a quiet terminal command center for local coding-agent work: dense enough to be useful, calm enough to stay open all day. The signature is a ccmux-inspired session picker: a compact list of privacy-safe agent rows, a wide-screen detail panel, and a footer that always tells the operator what can be done now.
+agentmux should feel like a quiet terminal command center for local coding-agent work: dense enough to be useful, calm enough to stay open all day. The signature is a compact session picker: a privacy-safe agent sidebar, a responsive live preview, and a footer that always tells the operator what can be done now.
 
 ## 2. Color
 
@@ -25,7 +25,7 @@ agentmux should feel like a quiet terminal command center for local coding-agent
 
 - Use semantic terminal colors only; do not add new dependencies or RGB-only styling for this branch.
 - Color must reinforce status, not carry information by itself. Text labels remain explicit.
-- Raw tmux names, terminal content, prompts, diffs, argv, full paths, credentials, and command stderr never appear in the UI.
+- Raw tmux names, argv, full paths, credentials, and command stderr never appear in the UI. Visible local tiles may show bounded text captured from their selected tmux pane.
 
 ## 3. Typography
 
@@ -132,6 +132,8 @@ No animation is used in this terminal branch.
 
 - Existing controls remain: `q`, Esc, Ctrl-C quit; `r` and `R` refresh.
 - Selection controls are read-only: `j` / Down select next, `k` / Up select previous, Home/End jump, and PageUp/PageDown move by a page-sized step.
+- Pane navigation uses `Enter` / `o` to switch the tmux client to the selected agent's real pane.
+- Preview focus uses `Tab` / `i` to forward keys to the selected agent; `s` toggles the sidebar.
 - Help controls are read-only: `?` and `h` toggle the keyboard overlay.
 - Do not add mutating actions, search, pinning, grouping, or previews.
 - The active row marker follows selection in this branch.
@@ -152,9 +154,9 @@ Use borders plus tonal emphasis. Ratatui panels provide structure; semantic colo
 ### Scope Exclusions
 
 - No non-loopback networking; the shipped daemon API is loopback-only.
-- No previews from terminal content.
-- No mutating actions beyond existing quit and refresh.
-- No search, pinning, grouping, Git/PR enrichment, persistence, or terminal-content scraping.
+- No separate preview surface; pane text belongs inside the selected agent tile.
+- No mutating dashboard actions beyond explicit focused-pane input forwarding; `Enter` / `o` only switch the tmux client to an existing pane.
+- No search, pinning, grouping, Git/PR enrichment, or persistence.
 - No external dependencies.
 - No unsafe code.
 - No raw `session_name` or `window_name` rendering; safe location format is `unknown:<window_index> unknown` plus pane id when needed.

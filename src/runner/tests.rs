@@ -10,8 +10,8 @@ use super::test_support::{
     FakeClock, FakeDiscovery, FakeEvents, FakePoll, FakeRenderer, key_event,
 };
 use super::{
-    Clock, DashboardDiscovery, DashboardEvents, advance_dashboard_event, run_dashboard_loop_with,
-    run_with,
+    ActionOutcome, Clock, DashboardDiscovery, DashboardEvents, advance_dashboard_action,
+    advance_dashboard_event, run_dashboard_loop_with, run_with,
 };
 
 #[test]
@@ -67,6 +67,24 @@ fn given_navigation_key_event_when_advanced_then_selection_moves() {
     // Then: the app remains running and selection moves.
     assert!(continue_running);
     assert_eq!(app.selected_index(), Some(1));
+}
+
+#[test]
+fn given_j_key_when_advanced_then_selection_moves_and_requests_preview_refresh() {
+    // Given: a dashboard with two rows and the first row selected.
+    let mut app = App::new();
+    app.replace_rows(vec![
+        DashboardRow::for_test("pane:%1"),
+        DashboardRow::for_test("pane:%2"),
+    ]);
+    let event = Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+
+    // When: the dashboard handles j through its production action path.
+    let outcome = advance_dashboard_action(&mut app, &event);
+
+    // Then: selection moves and the newly focused preview is refreshed immediately.
+    assert_eq!(app.selected_index(), Some(1));
+    assert_eq!(outcome, Some(ActionOutcome::Refresh));
 }
 
 #[test]

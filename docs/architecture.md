@@ -14,7 +14,7 @@ Client-specific authoritative adapters, persistence, Git / PR provider, previews
 | Transport | Loopback-only std HTTP/SSE subset for `/health`, `/state`, `/events`, and `/evidence` | Authentication, richer flow control, and persisted multi-client transport hardening |
 | State | Typed in-memory fallback snapshots plus daemon-owned authoritative waiting overlays and revisioned projection | Durable daemon state, adapter-specific identity, and persistence |
 | Agents | Pane-derived row IDs plus Linux procfs low-confidence basename candidates only | Agent adapters and authoritative identities |
-| Tmux | Strict read-only `list-panes` collection behind an in-process discovery facade | Broader safe tmux interaction, polling, and adaptive collection |
+| Tmux | Strict read-only `list-panes` collection plus read-only `capture-pane` hydration for dashboard tiles | Broader safe tmux interaction, polling, and adaptive collection |
 | Process evidence | Linux procfs PID/start-time and executable basename evidence; unavailable or conflicting evidence degrades to `unknown` | Platform-specific collectors and authoritative adapter evidence |
 | Search | None | Search index plus persistence |
 | Git / PR | None | Bounded cached provider |
@@ -41,7 +41,7 @@ flowchart LR
 - `inspect` runs the discovery facade once and writes the shared TSV projection after filtering out non-agent panes.
 - `dashboard` first reads daemon `/state`; when the daemon is unavailable or invalid, it runs the same facade synchronously in-process and filters out non-agent panes: initial refresh before first populated draw, automatic refresh every second, manual `r` / `R` refresh, and input polling capped so the UI remains responsive.
 - Refresh failures retain the last good dashboard rows and show `Status: degraded - dashboard refresh degraded; showing last good rows`.
-- The shipped daemon uses background threads and std-only loopback HTTP/SSE. It does not use async runtime, persistence, Git / PR lookups, previews, actions, non-loopback networking, or terminal-content scraping.
+- The shipped daemon uses background threads and std-only loopback HTTP/SSE. Dashboard-local pane capture is performed through the tmux boundary after daemon or fallback row refresh; captured text is not stored in daemon state or `/state`.
 
 ## Shipped Inspect Projection
 

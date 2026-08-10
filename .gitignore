@@ -14,3 +14,12 @@
 .env
 .env.*
 *.log
+
+# Local runtime files
+*.pid
+*.sock
+/coverage/
+
+# Editor metadata
+.idea/
+.vscode/

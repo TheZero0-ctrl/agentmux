@@ -60,6 +60,12 @@ impl Pane {
         &self.process
     }
 
+    /// Return privacy-safe selected process metadata for this pane.
+    #[must_use]
+    pub const fn process_metadata(&self) -> &ProcessMetadata {
+        &self.process_metadata
+    }
+
     /// Create the enriched observation for this pane with unknown new discovery metadata.
     #[must_use]
     pub fn observation(&self, state: AgentState) -> AgentObservation {

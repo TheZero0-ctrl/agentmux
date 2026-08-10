@@ -37,7 +37,7 @@ fn given_enriched_tmux_and_process_sources_when_refreshed_then_snapshot_contains
     let unknown = snapshot.agent("pane:%2").expect("unknown pane is present");
 
     // Then: candidate metadata reaches the normalized snapshot while unsupported trees stay unknown.
-    assert_eq!(candidate.state(), AgentState::Idle);
+    assert_eq!(candidate.state(), AgentState::Working);
     assert_eq!(
         candidate.observation().process_identity(),
         Some(&ProcessIdentity::new(111, 1_111))

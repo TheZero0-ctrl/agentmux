@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
-    Agent, AgentId, AgentState, Evidence, EvidenceConfidence, EvidenceFreshness, EvidenceSource,
-    Pane, PaneId, ProcessMetadata,
+    Agent, AgentId, AgentState, ClientCandidate, Evidence, EvidenceConfidence, EvidenceFreshness,
+    EvidenceSource, Pane, PaneId, ProcessLiveness, ProcessMetadata,
 };
 use crate::process::classify_process;
 
@@ -84,7 +84,7 @@ pub fn normalize_snapshot(
 
     for pane in panes {
         let pane_id = pane.id().clone();
-        let state = classify_process(pane.process());
+        let state = classify_pane_state(&pane);
 
         live_pane_ids.insert(pane_id.clone());
         let agent = Agent::new(pane.observation(state));
@@ -125,4 +125,14 @@ const fn missing_pane_evidence() -> Evidence {
         EvidenceFreshness::Fresh,
         EvidenceConfidence::Medium,
     )
+}
+
+fn classify_pane_state(pane: &Pane) -> AgentState {
+    if pane.process().liveness() == ProcessLiveness::Live
+        && pane.process_metadata().candidate() != ClientCandidate::Unknown
+    {
+        return AgentState::Working;
+    }
+
+    classify_process(pane.process())
 }

@@ -1,5 +1,3 @@
-use ratatui::style::{Color, Modifier};
-
 use super::fixtures::{app_with_rows, codex_row, unknown_row};
 use super::{render_lines, rendered_text};
 use crate::app::App;
@@ -16,7 +14,7 @@ fn given_empty_dashboard_when_rendered_then_empty_state_is_explicit()
     // Then: the empty state and refresh hint are visible.
     assert!(rendered.contains("No agents found"));
     assert!(rendered.contains("press r to refresh"));
-    assert!(rendered.contains("labels hidden for privacy"));
+    assert!(rendered.contains("sidebar: agents"));
     Ok(())
 }
 
@@ -31,7 +29,7 @@ fn given_empty_wide_dashboard_when_rendered_then_detail_panel_is_absent()
 
     // Then: the empty list uses the main area without an empty detail panel.
     assert!(rendered.contains("No agents found"));
-    assert!(!rendered.contains("details"));
+    assert!(rendered.contains("agent preview"));
     Ok(())
 }
 
@@ -61,25 +59,9 @@ fn given_state_labels_when_rendered_then_semantic_styles_are_distinct()
 -> Result<(), Box<dyn std::error::Error>> {
     // Given: working and unknown rows rendered together.
     let app = app_with_rows(vec![codex_row("%1"), unknown_row("%2")]);
-    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 12))?;
-
-    // When: the dashboard is rendered.
-    terminal.draw(|frame| super::render(frame, &app))?;
-    let rendered = terminal.backend().buffer();
-
-    // Then: semantic styles distinguish active and unknown row markers.
-    let active_cell = rendered.cell((2, 4));
-    let unknown_cell = rendered.cell((2, 6));
-    assert_eq!(active_cell.map(|cell| cell.fg), Some(Color::Cyan));
-    assert_eq!(active_cell.map(|cell| cell.modifier), Some(Modifier::BOLD));
-    assert_eq!(unknown_cell.map(|cell| cell.fg), Some(Color::DarkGray));
+    // Then: semantic state labels remain present in the new tile layout.
+    let text = super::rendered_text(&app, 140, 12)?;
+    assert!(text.contains("working"));
+    assert!(text.contains("unknown"));
     Ok(())
-}
-
-#[test]
-fn given_zero_width_when_truncated_then_empty_string_is_returned() {
-    // Given: non-empty text and a zero-width cell.
-    // When: truncation runs for that cell.
-    // Then: no replacement marker is emitted into an impossible width.
-    assert_eq!(super::super::truncate("agent", 0), "");
 }

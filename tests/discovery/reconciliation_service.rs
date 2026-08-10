@@ -51,7 +51,7 @@ fn reconciliation_given_failed_refresh_after_candidate_when_refreshed_then_norma
     );
     assert_eq!(
         service.snapshot().agent_state("pane:%1"),
-        Some(AgentState::Idle)
+        Some(AgentState::Working)
     );
     assert!(service.snapshot().agent("pane:%1").is_some());
     Ok(())

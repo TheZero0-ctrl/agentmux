@@ -17,6 +17,10 @@ pub(super) fn codex_row(pane_id: &str) -> DashboardRow {
         .with_evidence("process", "fresh", "low")
 }
 
+pub(super) fn content_row(pane_id: &str) -> DashboardRow {
+    codex_row(pane_id).with_content("line one\nline two\nlatest output")
+}
+
 pub(super) fn claude_row(pane_id: &str) -> DashboardRow {
     DashboardRow::for_test("pane:%2")
         .with_pane(pane_id)

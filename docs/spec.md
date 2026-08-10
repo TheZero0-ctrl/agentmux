@@ -24,7 +24,7 @@ Teams that use multiple coding agents need one place to see which local sessions
 - Editing agent internals or simulating agent output.
 - Treating a process basename as exact agent identity.
 - Inferring waiting states from tmux, procfs, command names, terminal content, or process trees.
-- Reading or displaying full command lines, prompts, diffs, credentials, environments, terminal content, or full workspace paths.
+- Reading or displaying full command lines, credentials, environments, or full workspace paths. Bounded local tmux pane text is displayed only in the focused preview.
 - Shipping persistence, Git/PR providers, previews, actions, search, terminal-content adapters, or client-specific authoritative identity adapters in the current milestone.
 
 ## Terms
@@ -43,7 +43,7 @@ Teams that use multiple coding agents need one place to see which local sessions
 ## Shipped Scope
 The current implementation is:
 - CLI startup.
-- `dashboard`: a synchronous in-process Ratatui dashboard that performs an initial refresh, refreshes automatically every second, supports manual `r` / `R` refresh, and quits with `q`, Esc, or Ctrl-C.
+- `dashboard`: a synchronous in-process Ratatui dashboard with a toggleable, project-grouped agent sidebar and one focused live preview; it performs an initial refresh, refreshes automatically every second, supports manual `r` / `R` refresh, and quits with `q`, Esc, or Ctrl-C.
 - `inspect`: a one-shot local discovery command that runs discovery once and prints the shared normalized TSV row projection for agent rows only.
 - Shared inspect/dashboard row fields: `agent_id`, `session_name`, `window_index`, `window_name`, `pane_id`, `pid`, `process_name`, `client`, `client_confidence`, `workspace`, `state`, `evidence_source`, `evidence_freshness`, and `evidence_confidence`.
 - Strict read-only `tmux list-panes` parsing into typed session, window, pane, workspace label, and current-command evidence.
@@ -51,10 +51,11 @@ The current implementation is:
 - Low-confidence client candidate classification for exact executable basenames `opencode`, `codex`, `claude`, and `gemini` only. Generic, lookalike, conflicting, missing, or degraded evidence remains `unknown`.
 - Deterministic fallback agent rows for live shell, live command, stale, dead, missing, degraded, and empty snapshots.
 - Degraded dashboard refresh handling that retains last good rows and shows a sanitized degraded message.
+- Toggleable sidebar listing discovered agents grouped by workspace, with the selected agent rendered as a responsive full-area local tmux pane preview. Pane capture failures affect only the focused preview.
 - `daemon`: a loopback-only local daemon that polls fallback discovery, ingests structured hook/marker/structured-log evidence, reconciles it in memory, and exposes `/health`, `/state`, `/events`, and `/evidence`.
 - Authoritative waiting states from structured evidence only: `waiting_permission`, `waiting_plan_approval`, and `waiting_question`. Hook evidence outranks marker evidence, marker outranks structured-log evidence, higher sequence wins within a source, and `clear` removes an override. Exited or missing fallback panes win over waiting evidence.
 - Dashboard daemon-first refresh: when the loopback daemon is reachable, dashboard rows come from daemon `/state`; otherwise the dashboard falls back to the existing in-process discovery path.
-- Privacy-safe presentation: full paths, argv, procfs cmdlines, raw session/window labels, prompts, diffs, credentials, environments, terminal content, and non-agent panes are not displayed in rows. Session and window names render as `unknown`; numeric window indexes remain available because they are parsed typed metadata.
+- Privacy-safe row presentation: full paths, argv, procfs cmdlines, raw session/window labels, credentials, environments, and non-agent panes are not displayed in rows. Visible tiles may render local tmux pane text by explicit dashboard request. Session and window names render as `unknown`; numeric window indexes remain available because they are parsed typed metadata.
 
 Everything below remains **Planned — not implemented yet**.
 
@@ -82,7 +83,7 @@ The shipped basename hints for `opencode`, `codex`, `claude`, and `gemini` are o
 
 ### Dashboard Capabilities
 - Repository context beyond privacy-safe workspace labels.
-- Live preview for the selected agent, branch, worktree, or PR.
+- Live preview for the selected agent, branch, worktree, or PR beyond the shipped local tmux pane-text tiles.
 - Act-in-place responses from the focused row or panel.
 - Docked sidebar resizing without moving the main layout.
 - Fuzzy search across agents, repos, branches, and reviews.
@@ -112,7 +113,7 @@ The shipped basename hints for `opencode`, `codex`, `claude`, and `gemini` are o
 - Minimize captured metadata to what the dashboard needs.
 - Make privacy boundaries visible in the UI.
 - Display sanitized workspace labels instead of full paths.
-- Do not read procfs cmdlines, environments, prompts, diffs, credentials, or terminal content for the shipped local discovery row.
+- Do not read procfs cmdlines, environments, prompts, diffs, credentials, or terminal content for the shipped local discovery row. Pane text is a separate bounded tile surface.
 
 ### Performance
 - Keep startup fast.

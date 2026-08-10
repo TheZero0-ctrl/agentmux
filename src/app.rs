@@ -1,5 +1,10 @@
 //! Application state boundary.
 
+use std::collections::BTreeSet;
+
+use ansi_to_tui::IntoText;
+use ratatui::text::Text;
+
 /// User intent applied to the application model.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -22,6 +27,12 @@ pub enum Action {
     PagePrevious,
     /// Toggle the dashboard help overlay.
     ToggleHelp,
+    /// Toggle the agent sidebar.
+    ToggleSidebar,
+    /// Toggle keyboard input forwarding for the selected agent.
+    ToggleInputMode,
+    /// Switch the tmux client to the selected agent's real pane.
+    OpenSelectedPane,
 }
 
 /// Owned dashboard row copied from the shared presentation projection.
@@ -41,33 +52,76 @@ pub struct DashboardRow {
     evidence_source: String,
     evidence_freshness: String,
     evidence_confidence: String,
+    content: String,
+    rendered_content: Option<Text<'static>>,
 }
 
 /// Focused application state for the dashboard loop.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct App {
-    running: bool,
+    running: RunningState,
     rows: Vec<DashboardRow>,
     degraded_message: Option<String>,
     selected_index: usize,
-    help_visible: bool,
+    help: Visibility,
+    sidebar: Visibility,
+    input: InputMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RunningState {
+    Running,
+    Stopped,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Visibility {
+    Visible,
+    Hidden,
+}
+
+impl Visibility {
+    const fn is_visible(self) -> bool {
+        matches!(self, Self::Visible)
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Visible => Self::Hidden,
+            Self::Hidden => Self::Visible,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InputMode {
+    Forwarding,
+    Browsing,
+}
+
+impl InputMode {
+    const fn is_forwarding(self) -> bool {
+        matches!(self, Self::Forwarding)
+    }
 }
 
 impl App {
     /// Create an empty running dashboard application state.
     pub const fn new() -> Self {
         Self {
-            running: true,
+            running: RunningState::Running,
             rows: Vec::new(),
             degraded_message: None,
             selected_index: 0,
-            help_visible: false,
+            help: Visibility::Hidden,
+            sidebar: Visibility::Visible,
+            input: InputMode::Browsing,
         }
     }
 
     /// Return whether the dashboard event loop should continue running.
     pub const fn is_running(&self) -> bool {
-        self.running
+        matches!(self.running, RunningState::Running)
     }
 
     /// Return the currently rendered dashboard rows.
@@ -92,7 +146,25 @@ impl App {
 
     /// Return whether the help overlay is visible.
     pub const fn is_help_visible(&self) -> bool {
-        self.help_visible
+        self.help.is_visible()
+    }
+
+    /// Return whether the agent sidebar is visible.
+    pub const fn is_sidebar_visible(&self) -> bool {
+        self.sidebar.is_visible()
+    }
+
+    /// Return the selected visible agent ID for focused preview hydration.
+    #[must_use]
+    pub fn selected_preview_agent_ids(&self) -> BTreeSet<String> {
+        self.selected_row().map_or_else(BTreeSet::new, |row| {
+            std::iter::once(row.agent_id().to_owned()).collect()
+        })
+    }
+
+    /// Return whether keyboard input is being forwarded to the selected agent.
+    pub const fn is_input_mode(&self) -> bool {
+        self.input.is_forwarding()
     }
 
     /// Return the sanitized degraded refresh message when the last refresh failed.
@@ -102,6 +174,15 @@ impl App {
 
     /// Replace dashboard rows after a successful refresh.
     pub fn replace_rows(&mut self, rows: Vec<DashboardRow>) {
+        let mut rows = rows;
+        // Keep keyboard traversal in the same order users see in the grouped
+        // sidebar: project/workspace first, then stable pane identity.
+        rows.sort_by(|left, right| {
+            left.workspace
+                .cmp(&right.workspace)
+                .then_with(|| left.pane_id.cmp(&right.pane_id))
+                .then_with(|| left.agent_id.cmp(&right.agent_id))
+        });
         self.rows = rows;
         self.degraded_message = None;
         self.clamp_selection();
@@ -116,16 +197,24 @@ impl App {
     pub fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => {
-                self.running = false;
+                self.running = RunningState::Stopped;
             }
-            Action::Refresh => {}
+            Action::Refresh | Action::OpenSelectedPane => {}
             Action::SelectNext => self.move_selection(1),
             Action::SelectPrevious => self.move_selection(-1),
             Action::SelectFirst => self.selected_index = 0,
             Action::SelectLast => self.select_last(),
             Action::PageNext => self.move_selection(5),
             Action::PagePrevious => self.move_selection(-5),
-            Action::ToggleHelp => self.help_visible = !self.help_visible,
+            Action::ToggleHelp => self.help = self.help.toggled(),
+            Action::ToggleSidebar => self.sidebar = self.sidebar.toggled(),
+            Action::ToggleInputMode => {
+                self.input = if self.is_input_mode() || self.selected_row().is_none() {
+                    InputMode::Browsing
+                } else {
+                    InputMode::Forwarding
+                };
+            }
         }
     }
 
@@ -192,6 +281,8 @@ impl DashboardRow {
             evidence_source: (*evidence_source).to_owned(),
             evidence_freshness: (*evidence_freshness).to_owned(),
             evidence_confidence: (*evidence_confidence).to_owned(),
+            content: String::new(),
+            rendered_content: None,
         })
     }
 
@@ -213,6 +304,8 @@ impl DashboardRow {
             evidence_source: row.evidence_source().to_owned(),
             evidence_freshness: row.evidence_freshness().to_owned(),
             evidence_confidence: row.evidence_confidence().to_owned(),
+            content: String::new(),
+            rendered_content: None,
         }
     }
 
@@ -298,6 +391,27 @@ impl DashboardRow {
     #[must_use]
     pub fn evidence_confidence(&self) -> &str {
         &self.evidence_confidence
+    }
+
+    /// Return the captured local pane text, or an empty string when unavailable.
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Return cached styled pane content for rendering.
+    pub const fn rendered_content(&self) -> Option<&Text<'static>> {
+        self.rendered_content.as_ref()
+    }
+
+    /// Attach captured local pane text without changing the row identity.
+    pub fn set_content(&mut self, content: String) {
+        self.rendered_content = content.as_bytes().to_vec().into_text().ok();
+        self.content = content;
+    }
+
+    /// Update the display state after terminal-content classification.
+    pub fn set_state(&mut self, state: &str) {
+        state.clone_into(&mut self.state);
     }
 }
 
