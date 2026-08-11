@@ -22,6 +22,7 @@ pub(super) fn render(frame: &mut Frame<'_>, area: Rect) {
         Line::from("r refresh | q quit"),
         Line::from("j/k select | tab/i focus input | s sidebar"),
         Line::from("enter/o switch to selected tmux pane (dashboard stays running)"),
+        Line::from("tmux prefix + A return to the agentmux pane"),
         Line::from("esc stop input"),
         Line::from(Span::styled("labels hidden for privacy", muted_style())),
     ];

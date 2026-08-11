@@ -2,7 +2,7 @@
 
 use crate::model::{ProcessLiveness, ProcessMetadata};
 use crate::process::{
-    classify_process_tree,
+    classify_process_tree, normalize_command_name,
     procfs::{LinuxProcessTreeSource, ProcessRecord},
 };
 use crate::state::{AgentSnapshot, normalize_snapshot};
@@ -69,7 +69,15 @@ where
         let panes = panes.into_iter().map(|pane| {
             let metadata = match (pane.process().liveness(), pane.process().pid()) {
                 (ProcessLiveness::Live, Some(pid)) => {
-                    classify_process_tree(&self.process_source.read_tree(pid))
+                    let metadata = classify_process_tree(&self.process_source.read_tree(pid));
+                    let foreground =
+                        normalize_command_name(pane.process().command().unwrap_or_default());
+                    match metadata.candidate().kind() {
+                        Some(kind) if foreground != Some(kind.label()) => {
+                            ProcessMetadata::unknown()
+                        }
+                        _ => metadata,
+                    }
                 }
                 (ProcessLiveness::Live, None)
                 | (ProcessLiveness::Dead | ProcessLiveness::Unknown, _) => {

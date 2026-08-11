@@ -16,7 +16,7 @@ fn given_enriched_tmux_and_process_sources_when_refreshed_then_snapshot_contains
     // Given: two tmux panes and injected process trees where one pane has an exact client candidate.
     let tmux_output = format!(
         "{}\n{}\n",
-        tmux_row(["w", "0", "a", "%1", "101", "0", "/t/a", "bash"]),
+        tmux_row(["w", "0", "a", "%1", "101", "0", "/t/a", "opencode"]),
         tmux_row(["w", "1", "o", "%2", "202", "0", "/t/o", "zsh"]),
     );
     let process_source = FakeProcessTreeSource::new([
@@ -61,18 +61,62 @@ fn given_enriched_tmux_and_process_sources_when_refreshed_then_snapshot_contains
 }
 
 #[test]
+fn given_shell_with_background_agent_processes_when_refreshed_then_panes_stay_unknown()
+-> Result<(), ModelError> {
+    // A helper/server process must not make an otherwise ordinary shell look like an agent pane.
+    let tmux_output = format!(
+        "{}\n{}\n{}\n{}\n",
+        tmux_row(["w", "0", "a", "%1", "101", "0", "/t/a", "bash"]),
+        tmux_row(["w", "1", "b", "%2", "202", "0", "/t/b", "bash"]),
+        tmux_row(["w", "2", "c", "%3", "303", "0", "/t/c", "bash"]),
+        tmux_row(["w", "3", "d", "%4", "404", "0", "/t/d", "bash"]),
+    );
+    let process_source = FakeProcessTreeSource::new([
+        (
+            101,
+            vec![record(101, 1_001, "bash")?, record(111, 1_111, "opencode")?],
+        ),
+        (
+            202,
+            vec![record(202, 2_002, "bash")?, record(222, 2_222, "codex")?],
+        ),
+        (
+            303,
+            vec![record(303, 3_003, "bash")?, record(333, 3_333, "claude")?],
+        ),
+        (
+            404,
+            vec![record(404, 4_004, "bash")?, record(444, 4_444, "gemini")?],
+        ),
+    ]);
+    let command = FakeTmuxCommand::new([Ok(tmux_output)]);
+    let mut service = DiscoveryService::with_sources(command, process_source);
+
+    let snapshot = service.refresh().expect("refresh succeeds");
+    for pane_id in ["pane:%1", "pane:%2", "pane:%3", "pane:%4"] {
+        let pane = snapshot.agent(pane_id).expect("pane is present");
+        assert_eq!(
+            pane.observation().client_candidate(),
+            ClientCandidate::Unknown
+        );
+        assert_eq!(pane.state(), AgentState::Idle);
+    }
+    Ok(())
+}
+
+#[test]
 fn given_one_pane_process_tree_degrades_when_refreshed_then_other_panes_still_keep_evidence()
 -> Result<(), ModelError> {
     // Given: two panes where the first process tree represents a procfs permission/race degradation.
     let tmux_output = format!(
         "{}\n{}\n",
         tmux_row(["w", "0", "a", "%1", "101", "0", "/t/a", "bash"]),
-        tmux_row(["w", "1", "o", "%2", "202", "0", "/t/o", "zsh"]),
+        tmux_row(["w", "1", "o", "%2", "202", "0", "/t/o", "codex"]),
     );
     let process_source = FakeProcessTreeSource::new([
         (
             202,
-            vec![record(202, 2_002, "zsh")?, record(222, 2_222, "codex")?],
+            vec![record(202, 2_002, "codex")?, record(222, 2_222, "codex")?],
         ),
         (101, Vec::new()),
     ]);
@@ -98,7 +142,7 @@ fn given_one_pane_process_tree_degrades_when_refreshed_then_other_panes_still_ke
     );
     assert_eq!(
         candidate.observation().process_identity(),
-        Some(&ProcessIdentity::new(222, 2_222))
+        Some(&ProcessIdentity::new(202, 2_002))
     );
     Ok(())
 }

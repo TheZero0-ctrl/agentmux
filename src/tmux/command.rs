@@ -37,6 +37,41 @@ impl TmuxCommand for SystemTmuxCommand {
 }
 
 impl SystemTmuxCommand {
+    /// Install the tmux-level shortcut used to return to agentmux.
+    pub fn install_dashboard_binding(&self) -> Result<(), TmuxError> {
+        let pane_id = std::env::var("TMUX_PANE").map_err(|_| {
+            TmuxError::command_failed(None, "agentmux is not running inside a tmux pane")
+        })?;
+        self.run_tmux([
+            "bind-key",
+            "-T",
+            "prefix",
+            "A",
+            "switch-client",
+            "-t",
+            &pane_id,
+        ])
+    }
+
+    /// Remove the tmux-level shortcut installed by agentmux.
+    pub fn remove_dashboard_binding(&self) {
+        let _ = self.run_tmux(["unbind-key", "-T", "prefix", "A"]);
+    }
+
+    fn run_tmux<const N: usize>(&self, args: [&str; N]) -> Result<(), TmuxError> {
+        let output = Command::new("tmux")
+            .args(args)
+            .output()
+            .map_err(|source| TmuxError::CommandIo { source })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(TmuxError::command_failed(
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+        ))
+    }
+
     /// Switch the current tmux client to a pane target.
     pub fn switch_client_to_pane(&self, pane_id: &str) -> Result<(), TmuxError> {
         let output = Command::new("tmux")

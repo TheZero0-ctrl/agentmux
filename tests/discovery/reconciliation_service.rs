@@ -24,7 +24,7 @@ fn reconciliation_given_failed_refresh_after_candidate_when_refreshed_then_norma
             "101",
             "0",
             "/tmp/private-api",
-            "bash",
+            "opencode",
         ])
     );
     let command =

@@ -104,9 +104,11 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, layout: DashboardLayout, app
         return;
     }
     let footer = match layout {
-        DashboardLayout::Narrow => "j/k select | tab/i input | enter/o switch | s sidebar | q quit",
+        DashboardLayout::Narrow => {
+            "j/k select | tab/i input | enter/o switch | prefix+A back | s sidebar | q quit"
+        }
         DashboardLayout::Medium | DashboardLayout::Wide => {
-            "j/k select | tab/i input | enter/o switch | s sidebar | r refresh | q quit"
+            "j/k select | tab/i input | enter/o switch | prefix+A back | s sidebar | r refresh | q quit"
         }
     };
     frame.render_widget(

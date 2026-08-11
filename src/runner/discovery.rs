@@ -26,6 +26,7 @@ pub(super) struct ProductionDiscovery<G = DashboardDaemonGuard<Child>, L = Local
     _daemon_guard: Option<G>,
     fallback: FallbackDiscovery<DaemonStateDiscovery, L>,
     capture_content: bool,
+    dashboard_binding_installed: bool,
 }
 
 impl ProductionDiscovery<DashboardDaemonGuard<Child>, LocalDiscovery> {
@@ -44,6 +45,8 @@ impl ProductionDiscovery<DashboardDaemonGuard<Child>, LocalDiscovery> {
         };
         let mut discovery = Self::from_parts(daemon, guard, LocalDiscovery::new());
         discovery.capture_content = true;
+        discovery.dashboard_binding_installed =
+            SystemTmuxCommand.install_dashboard_binding().is_ok();
         discovery
     }
 }
@@ -61,6 +64,15 @@ where
             _daemon_guard: guard,
             fallback: FallbackDiscovery::new(DaemonStateDiscovery { daemon }, local),
             capture_content: false,
+            dashboard_binding_installed: false,
+        }
+    }
+}
+
+impl<G, L> Drop for ProductionDiscovery<G, L> {
+    fn drop(&mut self) {
+        if self.dashboard_binding_installed {
+            SystemTmuxCommand.remove_dashboard_binding();
         }
     }
 }
@@ -249,10 +261,14 @@ fn classify_terminal_state(client: &str, content: &str) -> Option<&'static str> 
 
     // Only downgrade a live process when the pane exposes a known composer
     // footer. Unknown terminal layouts retain the process fallback.
-    ["ctrl+p commands", "ready for your next message"]
+    let idle_footer = ["ctrl+p commands", "ready for your next message"]
         .iter()
-        .any(|marker| content.contains(marker))
-        .then_some("idle")
+        .any(|marker| content.contains(marker));
+    let codex_composer = client == "codex"
+        && content
+            .lines()
+            .any(|line| line.trim_start().starts_with('›'));
+    (idle_footer || codex_composer).then_some("idle")
 }
 
 fn strip_ansi_sequences(content: &str) -> String {
@@ -313,6 +329,10 @@ mod tests {
         );
         assert_eq!(
             classify_terminal_state("codex", "ctrl+p commands"),
+            Some("idle")
+        );
+        assert_eq!(
+            classify_terminal_state("codex", "›  Type a message"),
             Some("idle")
         );
     }
