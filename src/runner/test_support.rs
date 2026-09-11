@@ -44,7 +44,7 @@ impl super::Clock for FakeClock {
 
     fn advance(&self, duration: Duration) {
         let now = self.now.get();
-        let next = now.checked_add(duration).map_or(now, |next| next);
+        let next = now.checked_add(duration).unwrap_or(now);
         self.now.set(next);
     }
 }

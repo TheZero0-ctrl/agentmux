@@ -215,8 +215,7 @@ fn is_escape_key(event: &Event) -> bool {
 }
 
 fn next_refresh_after(now: Instant) -> Instant {
-    now.checked_add(REFRESH_INTERVAL)
-        .map_or(now, |deadline| deadline)
+    now.checked_add(REFRESH_INTERVAL).unwrap_or(now)
 }
 
 fn advance_dashboard_action(app: &mut App, event: &Event) -> Option<ActionOutcome> {
