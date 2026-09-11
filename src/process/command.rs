@@ -1,7 +1,7 @@
-/// Normalize a process command to its basename without login-shell prefix.
+/// Normalize a process command's executable token to its basename.
 #[must_use]
 pub fn normalize_command_name(command: &str) -> Option<&str> {
-    let trimmed = command.trim();
+    let trimmed = command.split_whitespace().next()?;
     let basename = trimmed.rsplit('/').next()?;
     let without_login_prefix = basename
         .strip_prefix('-')

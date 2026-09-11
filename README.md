@@ -90,6 +90,7 @@ no agents discovered from tmux panes
 - [Specification](docs/spec.md)
 - [Architecture](docs/architecture.md)
 - [Implementation plan](docs/plan.md)
+- [Release process](docs/releasing.md)
 
 ## Roadmap
 

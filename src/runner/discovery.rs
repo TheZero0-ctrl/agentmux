@@ -1,6 +1,6 @@
 //! Dashboard discovery implementations.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::net::SocketAddr;
 use std::process::Child;
@@ -20,6 +20,49 @@ use super::{DashboardDiscovery, DashboardOptions};
 
 const DAEMON_TIMEOUT: Duration = Duration::from_millis(100);
 const MAX_PANE_CONTENT_CHARS: usize = 32_000;
+const IDLE_CONFIRMATIONS: u8 = 2;
+
+#[derive(Debug, Default)]
+struct TerminalStateTracker {
+    panes: BTreeMap<String, TrackedTerminalState>,
+}
+
+#[derive(Debug, Default)]
+struct TrackedTerminalState {
+    stable: Option<&'static str>,
+    idle_observations: u8,
+}
+
+impl TerminalStateTracker {
+    const fn new() -> Self {
+        Self {
+            panes: BTreeMap::new(),
+        }
+    }
+
+    fn observe(&mut self, agent_id: &str, observed: &'static str) -> Option<&'static str> {
+        let tracked = self.panes.entry(agent_id.to_owned()).or_default();
+        if observed == "idle" {
+            tracked.idle_observations = tracked.idle_observations.saturating_add(1);
+            if tracked.stable == Some("idle") || tracked.idle_observations >= IDLE_CONFIRMATIONS {
+                tracked.stable = Some("idle");
+            }
+        } else {
+            tracked.stable = Some(observed);
+            tracked.idle_observations = 0;
+        }
+        tracked.stable
+    }
+
+    fn stable(&self, agent_id: &str) -> Option<&'static str> {
+        self.panes.get(agent_id).and_then(|state| state.stable)
+    }
+
+    fn retain(&mut self, agent_ids: &BTreeSet<String>) {
+        self.panes
+            .retain(|agent_id, _state| agent_ids.contains(agent_id));
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct ProductionDiscovery<G = DashboardDaemonGuard<Child>, L = LocalDiscovery> {
@@ -27,6 +70,7 @@ pub(super) struct ProductionDiscovery<G = DashboardDaemonGuard<Child>, L = Local
     fallback: FallbackDiscovery<DaemonStateDiscovery, L>,
     capture_content: bool,
     dashboard_binding_installed: bool,
+    terminal_states: TerminalStateTracker,
 }
 
 impl ProductionDiscovery<DashboardDaemonGuard<Child>, LocalDiscovery> {
@@ -65,6 +109,7 @@ where
             fallback: FallbackDiscovery::new(DaemonStateDiscovery { daemon }, local),
             capture_content: false,
             dashboard_binding_installed: false,
+            terminal_states: TerminalStateTracker::new(),
         }
     }
 }
@@ -84,7 +129,7 @@ where
     fn refresh(&mut self) -> io::Result<Vec<DashboardRow>> {
         let mut rows = self.fallback.refresh()?;
         if self.capture_content {
-            hydrate_pane_content(&mut rows, &BTreeSet::new());
+            hydrate_pane_content(&mut rows, &BTreeSet::new(), &mut self.terminal_states);
         }
         Ok(rows)
     }
@@ -95,7 +140,7 @@ where
     ) -> io::Result<Vec<DashboardRow>> {
         let mut rows = self.fallback.refresh()?;
         if self.capture_content {
-            hydrate_pane_content(&mut rows, visible_agent_ids);
+            hydrate_pane_content(&mut rows, visible_agent_ids, &mut self.terminal_states);
         }
         Ok(rows)
     }
@@ -146,9 +191,19 @@ fn tmux_key_name(code: KeyCode, modifiers: KeyModifiers) -> Option<String> {
     }
 }
 
-fn hydrate_pane_content(rows: &mut [DashboardRow], visible_agent_ids: &BTreeSet<String>) {
+fn hydrate_pane_content(
+    rows: &mut [DashboardRow],
+    visible_agent_ids: &BTreeSet<String>,
+    terminal_states: &mut TerminalStateTracker,
+) {
     let tmux = SystemTmuxCommand;
+    let current_agent_ids = rows
+        .iter()
+        .map(|row| row.agent_id().to_owned())
+        .collect::<BTreeSet<_>>();
+    terminal_states.retain(&current_agent_ids);
     for row in rows {
+        let agent_id = row.agent_id().to_owned();
         if let Ok(content) = tmux.capture_pane(row.pane_id()) {
             let content = normalize_preview_ansi(&sanitize_pane_content(&content));
             if visible_agent_ids.is_empty() || visible_agent_ids.contains(row.agent_id()) {
@@ -156,16 +211,18 @@ fn hydrate_pane_content(rows: &mut [DashboardRow], visible_agent_ids: &BTreeSet<
             }
             if let Some(state) = classify_terminal_state(row.client(), &content) {
                 let preserves_wait = row.state().starts_with("waiting_") && state == "idle";
-                if !preserves_wait {
-                    row.set_state(state);
+                if !preserves_wait && let Some(stable) = terminal_states.observe(&agent_id, state) {
+                    row.set_state(stable);
                 }
             }
+        } else if let Some(stable) = terminal_states.stable(&agent_id) {
+            row.set_state(stable);
         }
     }
 }
 
 /// Remove terminal hyperlink controls and neutralize underline attributes.
-/// OpenCode uses OSC-8 links in its rendered output; `ansi_to_tui` can retain
+/// `OpenCode` uses OSC-8 links in its rendered output; `ansi_to_tui` can retain
 /// that underline state after a truncated/cropped link sequence.
 fn normalize_preview_ansi(content: &str) -> String {
     let mut normalized = String::with_capacity(content.len());
@@ -221,54 +278,88 @@ fn normalize_preview_ansi(content: &str) -> String {
 /// A live agent process alone is not enough to call a session working: most
 /// interactive agent processes remain alive at their idle composer.
 fn classify_terminal_state(client: &str, content: &str) -> Option<&'static str> {
+    let client = client.trim().to_ascii_lowercase();
+    let client = client.strip_suffix(".exe").unwrap_or(&client);
     let content = strip_ansi_sequences(content).to_ascii_lowercase();
-    let waiting = match client {
-        "opencode" => ["allow once", "allow always", "reject", "[y/n]", "(y/n)"]
-            .iter()
-            .any(|marker| content.contains(marker)),
-        "codex" => [
+    let waiting_markers: &[&str] = match client {
+        "opencode" => &["allow once", "allow always", "reject", "[y/n]", "(y/n)"],
+        "codex" => &[
             "would you like to run the following command?",
             "would you like to make the following edits?",
             "would you like to grant these permissions?",
             "press enter to confirm or esc to cancel",
             "allow command?",
-        ]
-        .iter()
-        .any(|marker| content.contains(marker)),
-        "claude" => content.contains("requires approval") || content.contains("permission rule"),
-        _ => false,
+        ],
+        "claude" => &["requires approval", "permission rule"],
+        _ => &[],
     };
-    if waiting {
-        return Some("waiting_permission");
-    }
-
-    let working = match client {
-        "opencode" => [
-            "esc interrupt",
-            "esc again to interrupt",
-            "ctrl+c to interrupt",
-        ]
-        .iter()
-        .any(|marker| content.contains(marker)),
-        "codex" => ["esc to interrupt", "ctrl+c to interrupt"]
-            .iter()
-            .any(|marker| content.contains(marker)),
-        _ => false,
-    };
-    if working {
-        return Some("working");
-    }
+    let waiting_line = content
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            waiting_markers
+                .iter()
+                .any(|marker| line.contains(marker))
+                .then_some(index)
+        })
+        .last();
 
     // Only downgrade a live process when the pane exposes a known composer
     // footer. Unknown terminal layouts retain the process fallback.
-    let idle_footer = ["ctrl+p commands", "ready for your next message"]
-        .iter()
-        .any(|marker| content.contains(marker));
+    let idle_line = content
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            (line.contains("ready for your next message")
+                || (line.contains("ctrl+p") && line.contains("commands")))
+            .then_some(index)
+        })
+        .last();
     let codex_composer = client == "codex"
         && content
             .lines()
             .any(|line| line.trim_start().starts_with('›'));
-    (idle_footer || codex_composer).then_some("idle")
+    let markers: &[&str] = match client {
+        "opencode" => &[
+            "esc interrupt",
+            "esc again to interrupt",
+            "ctrl+c to interrupt",
+        ],
+        "codex" => &["esc to interrupt", "ctrl+c to interrupt"],
+        _ => &[],
+    };
+    let working_line = content
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            markers
+                .iter()
+                .any(|marker| line.contains(marker))
+                .then_some(index)
+        })
+        .last();
+    if let Some(waiting_line) = waiting_line {
+        let latest_other_line = idle_line.into_iter().chain(working_line).max();
+        if latest_other_line.is_none_or(|line| waiting_line > line) {
+            return Some("waiting_permission");
+        }
+    }
+    if let Some(working_line) = working_line {
+        if idle_line.is_some_and(|idle_line| working_line < idle_line) {
+            return Some("idle");
+        }
+        return Some("working");
+    }
+    if idle_line.is_some() || codex_composer {
+        return Some("idle");
+    }
+    match client {
+        // These interactive processes remain alive at rest. Once a pane was
+        // captured successfully, absence of a current waiting/interrupt
+        // marker means the agent is idle rather than actively working.
+        "opencode" | "codex" => Some("idle"),
+        _ => None,
+    }
 }
 
 fn strip_ansi_sequences(content: &str) -> String {
@@ -307,19 +398,34 @@ fn sanitize_pane_content(content: &str) -> String {
     // Keep the newest screen content. The composer and status footer are at
     // the bottom of the pane, and truncating from the front is what caused
     // OpenCode's input area to disappear on larger captures.
-    let mut start = sanitized.len() - MAX_PANE_CONTENT_CHARS;
+    let mut start = sanitized.len().saturating_sub(MAX_PANE_CONTENT_CHARS);
     while !sanitized.is_char_boundary(start) {
-        start -= 1;
+        start = start.saturating_sub(1);
     }
     if let Some(offset) = sanitized[start..].find('\n') {
-        start += offset + 1;
+        start = start.saturating_add(offset.saturating_add(1));
     }
     format!("\u{1b}[0m{}", &sanitized[start..])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_terminal_state, normalize_preview_ansi, sanitize_pane_content};
+    use super::{
+        TerminalStateTracker, classify_terminal_state, normalize_preview_ansi,
+        sanitize_pane_content,
+    };
+
+    #[test]
+    fn terminal_state_tracker_debounces_idle_and_retains_stable_state() {
+        let mut tracker = TerminalStateTracker::new();
+
+        assert_eq!(tracker.observe("pane:%1", "working"), Some("working"));
+        assert_eq!(tracker.observe("pane:%1", "idle"), Some("working"));
+        assert_eq!(tracker.observe("pane:%1", "working"), Some("working"));
+        assert_eq!(tracker.observe("pane:%1", "idle"), Some("working"));
+        assert_eq!(tracker.observe("pane:%1", "idle"), Some("idle"));
+        assert_eq!(tracker.stable("pane:%1"), Some("idle"));
+    }
 
     #[test]
     fn idle_agent_footer_is_reported_as_idle() {
@@ -346,8 +452,58 @@ mod tests {
     }
 
     #[test]
-    fn unknown_terminal_layout_does_not_override_process_fallback() {
-        assert_eq!(classify_terminal_state("opencode", "agent output"), None);
+    fn idle_footer_wins_over_stale_working_text() {
+        assert_eq!(
+            classify_terminal_state("opencode", "previous esc interrupt\nctrl+p commands"),
+            Some("idle")
+        );
+        assert_eq!(
+            classify_terminal_state("opencode", "esc interrupt    ctrl+p commands"),
+            Some("working")
+        );
+    }
+
+    #[test]
+    fn current_working_line_wins_over_stale_permission_text() {
+        assert_eq!(
+            classify_terminal_state(
+                "opencode",
+                "allow once\nold output\nesc interrupt    ctrl+p commands"
+            ),
+            Some("working")
+        );
+    }
+
+    #[test]
+    fn codex_working_marker_wins_over_persistent_composer() {
+        assert_eq!(
+            classify_terminal_state(
+                "codex",
+                "Working (30s • esc to interrupt)\n› Ask Codex to do anything"
+            ),
+            Some("working")
+        );
+    }
+
+    #[test]
+    fn launcher_suffix_uses_the_same_idle_status_rules() {
+        assert_eq!(
+            classify_terminal_state("opencode.exe", "ctrl+p commands"),
+            Some("idle")
+        );
+    }
+
+    #[test]
+    fn captured_agent_without_active_marker_is_reported_as_idle() {
+        assert_eq!(
+            classify_terminal_state("opencode", "completed agent output"),
+            Some("idle")
+        );
+        assert_eq!(
+            classify_terminal_state("codex", "completed agent output"),
+            Some("idle")
+        );
+        assert_eq!(classify_terminal_state("gemini", "agent output"), None);
     }
 
     #[test]

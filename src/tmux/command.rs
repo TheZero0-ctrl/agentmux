@@ -42,7 +42,7 @@ impl SystemTmuxCommand {
         let pane_id = std::env::var("TMUX_PANE").map_err(|_| {
             TmuxError::command_failed(None, "agentmux is not running inside a tmux pane")
         })?;
-        self.run_tmux([
+        Self::run_tmux([
             "bind-key",
             "-T",
             "prefix",
@@ -55,10 +55,10 @@ impl SystemTmuxCommand {
 
     /// Remove the tmux-level shortcut installed by agentmux.
     pub fn remove_dashboard_binding(&self) {
-        let _ = self.run_tmux(["unbind-key", "-T", "prefix", "A"]);
+        let _ = Self::run_tmux(["unbind-key", "-T", "prefix", "A"]);
     }
 
-    fn run_tmux<const N: usize>(&self, args: [&str; N]) -> Result<(), TmuxError> {
+    fn run_tmux<const N: usize>(args: [&str; N]) -> Result<(), TmuxError> {
         let output = Command::new("tmux")
             .args(args)
             .output()
@@ -105,7 +105,9 @@ impl SystemTmuxCommand {
     /// Capture the current visible text from one tmux pane.
     pub fn capture_pane(&self, pane_id: &str) -> Result<String, TmuxError> {
         let output = Command::new("tmux")
-            .args(["capture-pane", "-e", "-p", "-t", pane_id])
+            // Join tmux soft-wrapped rows so status markers such as
+            // `ctrl+p commands` remain recognizable on narrow panes.
+            .args(["capture-pane", "-e", "-J", "-p", "-t", pane_id])
             .output()
             .map_err(|source| TmuxError::CommandIo { source })?;
         if output.status.success() {

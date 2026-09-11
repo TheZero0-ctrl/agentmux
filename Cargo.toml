@@ -3,8 +3,12 @@ name = "agentmux"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
+description = "A terminal dashboard for monitoring and switching between coding agents"
 license = "MIT"
 readme = "README.md"
+default-run = "agentmux"
+keywords = ["tmux", "terminal", "tui", "coding-agent"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 ansi-to-tui = "8.0.1"

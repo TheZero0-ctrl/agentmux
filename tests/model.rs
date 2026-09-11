@@ -260,12 +260,13 @@ fn given_padded_process_command_when_observed_then_stored_command_is_trimmed() {
 
 #[test]
 fn given_whitespace_commands_when_normalized_then_current_basename_rules_hold() {
-    // Given: whitespace, path, and login-shell command strings.
+    // Given: whitespace, paths, arguments, and login-shell command strings.
     let commands = [
         ("", None),
         ("   ", None),
         ("  /usr/bin/bash  ", Some("bash")),
         (" /usr/bin/-zsh ", Some("zsh")),
+        (" /usr/bin/opencode --continue ", Some("opencode")),
         ("  python  ", Some("python")),
     ];
 

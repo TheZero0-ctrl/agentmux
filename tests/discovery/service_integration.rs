@@ -105,6 +105,53 @@ fn given_shell_with_background_agent_processes_when_refreshed_then_panes_stay_un
 }
 
 #[test]
+fn given_agent_command_with_arguments_when_refreshed_then_all_agents_are_detected()
+-> Result<(), ModelError> {
+    let tmux_output = format!(
+        "{}\n{}\n{}\n{}\n",
+        tmux_row([
+            "w",
+            "0",
+            "a",
+            "%1",
+            "101",
+            "0",
+            "/t/a",
+            "opencode --continue"
+        ]),
+        tmux_row(["w", "1", "b", "%2", "202", "0", "/t/b", "codex --full-auto"]),
+        tmux_row(["w", "2", "c", "%3", "303", "0", "/t/c", "claude --continue"]),
+        tmux_row(["w", "3", "d", "%4", "404", "0", "/t/d", "gemini --resume"]),
+    );
+    let process_source = FakeProcessTreeSource::new([
+        (101, vec![record(101, 1_001, "opencode")?]),
+        (202, vec![record(202, 2_002, "codex")?]),
+        (303, vec![record(303, 3_003, "claude")?]),
+        (404, vec![record(404, 4_004, "gemini")?]),
+    ]);
+    let command = FakeTmuxCommand::new([Ok(tmux_output)]);
+    let mut service = DiscoveryService::with_sources(command, process_source);
+
+    let snapshot = service.refresh().expect("refresh succeeds");
+    for (pane_id, kind) in [
+        ("pane:%1", ClientKind::OpenCode),
+        ("pane:%2", ClientKind::Codex),
+        ("pane:%3", ClientKind::Claude),
+        ("pane:%4", ClientKind::Gemini),
+    ] {
+        assert_eq!(
+            snapshot
+                .agent(pane_id)
+                .expect("pane is present")
+                .observation()
+                .client_candidate(),
+            ClientCandidate::known(kind, ClientConfidence::Low)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn given_one_pane_process_tree_degrades_when_refreshed_then_other_panes_still_keep_evidence()
 -> Result<(), ModelError> {
     // Given: two panes where the first process tree represents a procfs permission/race degradation.

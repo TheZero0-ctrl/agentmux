@@ -59,7 +59,11 @@ fn selected_candidate(records: &[ProcessRecord]) -> Option<SelectedCandidate<'_>
 }
 
 fn candidate_kind(basename: &ProcessBasename) -> Option<ClientKind> {
-    match basename.as_str() {
+    let executable = basename
+        .as_str()
+        .strip_suffix(".exe")
+        .unwrap_or(basename.as_str());
+    match executable {
         "opencode" => Some(ClientKind::OpenCode),
         "codex" => Some(ClientKind::Codex),
         "claude" => Some(ClientKind::Claude),
@@ -108,6 +112,17 @@ mod tests {
             let metadata = classify_process_tree(&[record(identity, basename)?]);
             assert_known(&metadata, identity, basename, kind)?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn given_supported_windows_launcher_suffix_when_classified_then_candidate_is_detected()
+    -> Result<(), ModelError> {
+        let identity = ProcessIdentity::new(105, 1_005);
+        let metadata = classify_process_tree(&[record(identity, "opencode.exe")?]);
+
+        assert_eq!(metadata.candidate().kind(), Some(ClientKind::OpenCode));
+        assert_eq!(metadata.identity(), Some(&identity));
         Ok(())
     }
 
