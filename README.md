@@ -1,106 +1,121 @@
 # agentmux
 
-agentmux is the terminal dashboard for coding-agent workflows.
+Monitor and control coding agents across all of your local tmux sessions from one terminal dashboard.
 
-## Current capabilities
+agentmux discovers supported agent processes, groups them by project, shows the selected pane live, and lets you jump to or type into that pane without losing the dashboard.
 
-- CLI binary: `agentmux`
-- Supported commands: `dashboard`, `inspect`, `daemon`
-- Interactive surface: a responsive Ratatui dashboard that auto-starts a missing local daemon, prefers daemon state, and shows the same filtered agent rows as `inspect`
-- Outside an interactive terminal, the binary exits successfully without opening the shell
-- Local discovery: strict read-only `tmux list-panes` collection plus Linux procfs process-tree evidence when available; presentation filters out non-agent panes
-- Linux-first candidate hints: exact executable basenames `opencode`, `codex`, `claude`, and `gemini` appear only as low-confidence candidates, never as authoritative identities
-- Unknown semantics: missing, degraded, conflicting, generic, lookalike, or incomplete process evidence stays `unknown`
-- Conservative states: live shell, live command, stale, dead, and missing pane evidence map to safe fallback states; waiting states are accepted only from structured hook, marker, or structured-log evidence
-- Live daemon: `agentmux daemon` binds to loopback only, accepts structured evidence, overlays authoritative waiting states onto fallback discovery, and exposes privacy-safe `/health`, `/state`, `/events`, and `/evidence`
-- Dashboard refresh and navigation: synchronous in-process initial refresh, automatic refresh every second, manual `r` / `R` refresh, row selection with `j` / `k`, arrows, Home/End, PageUp/PageDown, project-grouped sidebar with `s`, help with `?` / `h`, live preview input focus with `Tab` / `i`, switching to the selected real tmux pane with `Enter` / `o`, and quit controls `q`, Esc, and Ctrl-C
-- Live preview: the selected agent renders its current tmux pane text, refreshed with the dashboard projection; unavailable panes show an empty-content fallback without degrading discovery. Press `i` to forward keyboard input to the focused pane, `o` to switch the tmux client to the focused agent's real pane while leaving agentmux running, `tmux prefix + A` to return to agentmux, and `Esc` to leave input mode.
-- Degraded behavior: refresh failures keep the last good dashboard rows and show a sanitized degraded message
-- Privacy boundary: rows display sanitized workspace basenames and executable basenames only; full paths, argv, credentials, and procfs cmdlines are not displayed or retained in presentation rows. Pane text is captured only for visible local tiles and is not retained in daemon state.
+## Features
+
+- Discovers agents across tmux sessions, windows, and panes.
+- Recognizes Codex, OpenCode, Claude Code, and Gemini CLI processes.
+- Groups agents by project in a keyboard-navigable sidebar.
+- Shows one responsive, full-size live pane preview at a time.
+- Reports `working`, `idle`, `waiting_permission`, `unknown`, and `exited` states conservatively.
+- Forwards input to the selected pane only after entering input mode.
+- Switches the current tmux client to an agent pane and keeps agentmux running.
+- Keeps process metadata private and binds its optional daemon to loopback only.
+
+## Requirements
+
+- Linux
+- tmux
+- A terminal with color and keyboard input support
+
+Building from source also requires Rust 1.96 or newer.
+
+## Installation
+
+Download the Linux x86_64 archive and checksum from the [latest GitHub release](https://github.com/TheZero0-ctrl/agentmux/releases/latest), extract it, and place `agentmux` somewhere on your `PATH`.
+
+To build from source:
+
+```sh
+git clone https://github.com/TheZero0-ctrl/agentmux.git
+cd agentmux
+cargo build --locked --release
+install -Dm755 target/release/agentmux ~/.local/bin/agentmux
+```
+
+## Quick start
+
+Run agentmux from inside tmux:
+
+```sh
+agentmux
+```
+
+The default command opens the dashboard. Start Codex, OpenCode, Claude Code, or Gemini CLI in any local tmux pane; discovered agents appear automatically.
+
+Use `j` and `k` to select an agent. Press `Enter` to switch to its real tmux pane. While agentmux is running, press your tmux prefix followed by `A` to return to the dashboard pane.
+
+## Keyboard controls
+
+| Key | Action |
+| --- | --- |
+| `j` / `Down` | Select next agent |
+| `k` / `Up` | Select previous agent |
+| `Home` / `End` | Select first or last agent |
+| `PageUp` / `PageDown` | Move through the list by page |
+| `Tab` / `i` | Enter input mode for the selected pane |
+| `Esc` | Leave input mode |
+| `Enter` / `o` | Switch to the selected tmux pane |
+| tmux prefix + `A` | Return to the agentmux pane |
+| `s` | Toggle the sidebar |
+| `r` | Refresh immediately |
+| `?` / `h` | Toggle help |
+| `q` / `Ctrl-C` | Quit |
+
+In input mode, keyboard events are sent directly to the selected agent pane. Leave input mode with `Esc` before using dashboard shortcuts.
 
 ## Commands
 
-- `cargo build`
-- `cargo test`
-- `cargo run`
-- `cargo run -- dashboard`
-- `cargo run -- dashboard --no-daemon`
-- `cargo run -- inspect`
-- `cargo run -- daemon --bind 127.0.0.1:47631`
-- `cargo run -- --help`
-
-## Dashboard
-
-`agentmux dashboard` opens a local dashboard with a header/status area, responsive main area, and compact footer controls.
-
-- Wide terminals show a privacy-safe agent list plus a detail panel for the selected row.
-- Medium terminals show a single list with safe location, workspace, process, and evidence metadata.
-- Narrow terminals collapse to compact essentials: client, state, and safe pane location.
-- Empty and degraded states are explicit; degraded refreshes keep the last good rows.
-- Selection follows keyboard navigation and scrolls the visible list when the selected row moves outside the viewport.
-- The sidebar lists discovered agents grouped by sanitized project/workspace name. `s` toggles the sidebar; `j` / `k` selection controls the single full-area live preview.
-
-The dashboard does not render raw tmux session names, raw window names, argv, full paths, credentials, or raw command stderr. The selected tmux pane text is rendered in the full-area preview.
-
-In an interactive terminal, `agentmux dashboard` checks `GET /health` on `127.0.0.1:47631`. If a healthy daemon is already running, the dashboard uses it without owning or stopping it. If the endpoint is unreachable, the dashboard starts the current executable as `agentmux daemon --bind 127.0.0.1:47631`, owns only that child process, and stops/reaps that child when the dashboard exits. If the endpoint is occupied by an invalid listener, the dashboard does not spawn over it.
-
-`agentmux dashboard --no-daemon` skips daemon autostart. In all daemon-unavailable or invalid cases, the dashboard uses the existing in-process discovery path, filters out non-agent panes, and keeps the successful no-output behavior outside an interactive terminal.
-
-## Daemon API
-
-The daemon is a local-only vertical slice. It rejects non-loopback bind addresses and uses a small standard-library HTTP/SSE subset:
-
-- `GET /health`: plain text daemon health with the current revision.
-- `GET /state`: privacy-safe TSV beginning with `agentmux state`, `revision: <u64>`, `agents: <N>`, then the same projection header as `inspect`.
-- `GET /events`: `text/event-stream`; sends the current snapshot immediately and then snapshot events when revisions change.
-- `POST /evidence`: newline-delimited structured evidence, maximum 4096 bytes.
-
-Accepted evidence lines look like:
-
 ```text
-agentmux.v1 source=hook agent_id=pane:%1 state=waiting_permission sequence=42
+agentmux                         Open the dashboard
+agentmux dashboard              Open the dashboard explicitly
+agentmux dashboard --no-daemon  Do not start a local daemon automatically
+agentmux inspect                Print one discovery snapshot as TSV
+agentmux daemon                 Run the local state daemon
+agentmux --help                 Show CLI help
 ```
 
-`source` is `hook`, `marker`, or `structured_log`. `state` is `waiting_permission`, `waiting_plan_approval`, `waiting_question`, or `clear`. Hook evidence outranks marker evidence, marker outranks structured-log evidence, and higher sequence wins within one source. `clear` removes an override. Missing or exited fallback panes still win over waiting evidence.
+The dashboard starts a local daemon on `127.0.0.1:47631` when one is not already available. If the daemon cannot be used, discovery falls back to the in-process path. `--no-daemon` uses an existing daemon when available but never starts one.
 
-`agentmux inspect` prints a deterministic table when panes are discovered:
+## Agent status
 
-```text
+agentmux combines tmux pane data, Linux process-tree evidence, and current terminal state. A running client process is not automatically treated as active: known composer and interrupt markers are used to distinguish idle and working sessions. Brief ambiguous transitions are stabilized to avoid status flicker.
+
+Waiting states may also be supplied as structured evidence to the local daemon. Unknown or incomplete evidence stays `unknown` instead of being presented as certainty.
+
+## Discovery and privacy
+
+Discovery is local and spans every pane returned by `tmux list-panes -a`. Process inspection reads Linux procfs and matches exact supported executable names, including launchers with arguments and `.exe` suffixes.
+
+The sidebar uses sanitized project labels. Raw tmux session/window names, full command lines, environments, credentials, and full paths are excluded from projected rows. Bounded pane captures refine live status; only the selected pane's content is retained in the dashboard model for preview, and pane text is never retained in daemon state.
+
+## Troubleshooting
+
+If an agent is missing, verify that it is running in tmux and that its foreground process resolves to `codex`, `opencode`, `claude`, or `gemini`. Then press `r` or compare discovery output with:
+
+```sh
 agentmux inspect
-agents: 1
-agent_id	session_name	window_index	window_name	pane_id	pid	process_name	client	client_confidence	workspace	state	evidence_source	evidence_freshness	evidence_confidence
-pane:%1	unknown	0	unknown	%1	1234	opencode	opencode	low	agentmux	working	tmux	fresh	low
+tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}'
 ```
 
-The `session_name` and `window_name` columns render as `unknown`; raw tmux labels can contain prompts, tokens, diffs, or other sensitive text.
+If switching works but tmux prefix + `A` does not return to the dashboard, make sure agentmux itself was started inside a tmux pane.
 
-The `client` column is a low-confidence local candidate derived from an exact executable basename on Linux procfs evidence. It is `unknown` when evidence is missing, conflicting, unsupported, generic, unavailable, or not Linux procfs-backed.
+## Documentation
 
-When no tmux panes are discovered, it prints:
-
-```text
-agentmux inspect
-agents: 0
-no agents discovered from tmux panes
-```
-
-## Docs
-
-- [Design system](DESIGN.md)
-- [Specification](docs/spec.md)
+- [Product specification](docs/spec.md)
 - [Architecture](docs/architecture.md)
-- [Implementation plan](docs/plan.md)
-- [Release process](docs/releasing.md)
+- [Development roadmap](docs/plan.md)
+- [Design system](DESIGN.md)
+- [Release guide](docs/releasing.md)
 
-## Roadmap
+## Development
 
-The roadmap is tracked in `docs/plan.md`. Shipped local discovery now includes the loopback daemon state/API vertical slice, project-grouped agent sidebar, focused main preview, and local tmux pane-text capture. Act-in-place actions, search, Git/PR enrichment, cross-platform discovery, adapter-specific identity, durable persistence, and cross-session persistence remain future work.
-
-1. Foundation
-2. tmux/Linux procfs discovery + state
-3. hooks/log adapters
-4. daemon/SSE/reconciliation
-5. preview/action
-6. sidebar/search/grouping/pinning
-7. Git/PR enrichment
-8. hardening/distribution
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets --all-features
+cargo build --locked --release
+```

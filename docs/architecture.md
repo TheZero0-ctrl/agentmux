@@ -1,228 +1,104 @@
-# agentmux Architecture
+# Architecture
 
-## Scope
+agentmux is a Rust terminal application with a read-only discovery pipeline, an optional local state daemon, and a Ratatui dashboard. The dashboard can continue operating through in-process discovery when the daemon is unavailable.
 
-The current implementation includes the CLI entrypoint, a synchronous Ratatui dashboard, the Phase 2 local discovery tracer, and a loopback live daemon slice. Local discovery still owns strict tmux pane collection, Linux procfs process-tree evidence when available, conservative low-confidence client candidate classification, the shared presentation projection, and one-shot `agentmux inspect` output. The daemon adds in-memory authoritative waiting-state evidence, loopback HTTP/SSE state, and dashboard daemon-first fallback.
-
-Client-specific authoritative adapters, persistence, Git / PR provider, previews, actions, search persistence, non-loopback transport, terminal-content adapters, and richer dashboard surfaces below remain future architecture.
-
-## Current capabilities vs planned
-
-| Area | Current | Future |
-| --- | --- | --- |
-| UI | Synchronous Ratatui dashboard with initial refresh, 1-second automatic refresh, manual `r` / `R` refresh, and `q` / Esc / Ctrl-C quit; it prefers daemon `/state` and falls back to in-process discovery | Multi-client dashboard surfaces, previews, actions, search, grouping, and repository views |
-| Transport | Loopback-only std HTTP/SSE subset for `/health`, `/state`, `/events`, and `/evidence` | Authentication, richer flow control, and persisted multi-client transport hardening |
-| State | Typed in-memory fallback snapshots plus daemon-owned authoritative waiting overlays and revisioned projection | Durable daemon state, adapter-specific identity, and persistence |
-| Agents | Pane-derived row IDs plus Linux procfs low-confidence basename candidates only | Agent adapters and authoritative identities |
-| Tmux | Strict read-only `list-panes` collection plus read-only `capture-pane` hydration for dashboard tiles | Broader safe tmux interaction, polling, and adaptive collection |
-| Process evidence | Linux procfs PID/start-time and executable basename evidence; unavailable or conflicting evidence degrades to `unknown` | Platform-specific collectors and authoritative adapter evidence |
-| Search | None | Search index plus persistence |
-| Git / PR | None | Bounded cached provider |
-| Cancellation / flow control | None | Tokio cancellation, backpressure, bounded channels, timeouts |
-
-## Shipped Discovery And Daemon Flow
+## System overview
 
 ```mermaid
 flowchart LR
-  A[CLI command] --> B[In-process discovery facade]
-  B --> C[read-only tmux list-panes]
-  B --> D[Linux procfs tree when available]
-  C --> E[typed in-memory snapshot]
-  D --> E
-  E --> F[shared projection]
-  F --> G[inspect TSV]
-  F --> I[daemon reducer]
-  J[structured evidence] --> I
-  I --> K[loopback /state and /events]
-  K --> H[Ratatui dashboard]
-  F --> H
+    TMUX[tmux panes] --> DISCOVERY[Discovery service]
+    PROC[Linux procfs] --> DISCOVERY
+    DISCOVERY --> SNAPSHOT[Normalized snapshot]
+    EVIDENCE[Structured evidence] --> DAEMON[Loopback daemon]
+    SNAPSHOT --> DAEMON
+    DAEMON --> PROJECTION[Privacy-safe projection]
+    SNAPSHOT --> PROJECTION
+    PROJECTION --> INSPECT[inspect TSV]
+    PROJECTION --> DASHBOARD[Ratatui dashboard]
+    TMUX -->|bounded pane capture| DASHBOARD
+    DASHBOARD -->|explicit key forwarding| TMUX
+    DASHBOARD -->|switch client| TMUX
 ```
 
-- `inspect` runs the discovery facade once and writes the shared TSV projection after filtering out non-agent panes.
-- `dashboard` first reads daemon `/state`; when the daemon is unavailable or invalid, it runs the same facade synchronously in-process and filters out non-agent panes: initial refresh before first populated draw, automatic refresh every second, manual `r` / `R` refresh, and input polling capped so the UI remains responsive.
-- Refresh failures retain the last good dashboard rows and show `Status: degraded - dashboard refresh degraded; showing last good rows`.
-- The shipped daemon uses background threads and std-only loopback HTTP/SSE. Dashboard-local pane capture is performed through the tmux boundary after daemon or fallback row refresh; captured text is not stored in daemon state or `/state`.
+## Components
 
-## Shipped Inspect Projection
+### CLI
 
-The shipped inspect header is exactly:
+`src/cli.rs` defines three commands: `dashboard`, `inspect`, and `daemon`. Running the binary without a command opens the dashboard when attached to an interactive terminal.
+
+### Discovery
+
+The discovery service requests all local panes with `tmux list-panes -a`. Each row is parsed into typed pane identity and location data. On Linux, procfs traversal starts at the pane PID and finds supported foreground agent executables in the descendant process tree.
+
+Classification requires an exact normalized executable basename. Arguments do not affect matching, and a `.exe` launcher suffix is normalized. A pane is omitted from the dashboard if foreground evidence does not identify a supported agent.
+
+### State and projection
+
+Discovery produces a normalized snapshot keyed by pane-derived agent identity. The projection layer converts it to stable, privacy-safe rows consumed by both `inspect` and the dashboard.
+
+The projected TSV fields are:
 
 ```text
-agent_id	session_name	window_index	window_name	pane_id	pid	process_name	client	client_confidence	workspace	state	evidence_source	evidence_freshness	evidence_confidence
+agent_id session_name window_index window_name pane_id pid process_name client client_confidence workspace state evidence_source evidence_freshness evidence_confidence
 ```
 
-- `agent_id` remains pane-derived.
-- `client` is `opencode`, `codex`, `claude`, `gemini`, or `unknown`.
-- `client_confidence` is `low` for an exact supported Linux procfs executable basename and `unknown` otherwise.
-- `workspace` is a sanitized basename or `unknown`, not a full path.
-- `session_name` and `window_name` are approval-safe labels and render as `unknown`; raw tmux labels do not cross the projection boundary.
-- `pid` and `process_name` are selected process evidence when safely available, or `unknown`.
+Session and window names are represented as `unknown` at this boundary. Workspace values are sanitized basenames rather than full paths.
 
-## Planned architecture beyond the shipped daemon slice
+### Terminal preview and status
 
-```mermaid
-flowchart LR
-  subgraph UI[Future Ratatui clients]
-    A[Dashboard]
-    B[Search view]
-    C[Detail panel]
-  end
+The dashboard captures discovered agent panes to refine their live states, while retaining preview content only for the selected row after the initial refresh. `tmux capture-pane -e -J` preserves ANSI styling and joins soft-wrapped terminal rows. Captures are bounded to the newest 32,000 characters so the composer and status footer remain available.
 
-  subgraph API[Authenticated loopback HTTP + SSE]
-    D[Request handlers]
-    E[SSE event stream]
-  end
+The preview removes OSC hyperlinks and neutralizes underline attributes that can leak from truncated terminal sequences. Plain text is wrapped by Ratatui; ANSI terminal snapshots preserve their terminal layout.
 
-  subgraph CORE[Daemon state fold]
-    F[Event ingest]
-    G[State reducer]
-    H[Reconciliation loop]
-  end
+Current terminal markers refine interactive Codex and OpenCode states. Marker precedence is based on the latest relevant line, and a per-pane tracker requires two idle observations before replacing an active state. Capture failure retains the last stable status.
 
-  subgraph SOURCES[Agent adapters and collectors]
-    I[tmux collector]
-    J[agent adapters]
-    K[Git / PR provider]
-    L[Search + persistence]
-  end
+### Dashboard
 
-  A --> D
-  B --> D
-  C --> D
-  D --> F
-  F --> G
-  G --> E
-  E --> A
-  E --> B
-  E --> C
-  G --> H
-  H --> I
-  H --> J
-  H --> K
-  H --> L
+Application state owns rows, selection, sidebar visibility, help visibility, input mode, and degraded status. Rows are sorted by workspace and pane identity so keyboard traversal matches visual project grouping.
 
-  %% Explicit dependency direction
-  %% UI depends on API only.
-  %% UI never calls tmux directly.
-  %% Daemon owns tmux, adapters, and persistence.
-```
+The event loop:
 
-### Event Flow
+1. Refreshes before the first populated draw.
+2. Redraws and polls input with a bounded timeout.
+3. Refreshes every second or immediately after navigation/input.
+4. Preserves the last good rows when refresh fails.
 
-```mermaid
-sequenceDiagram
-  participant UI as Ratatui client
-  participant API as Loopback HTTP + SSE
-  participant CORE as Daemon state fold
-  participant TMUX as tmux collector
-  participant ADAPTER as agent adapter
+In browsing mode, dashboard keys update selection and UI state. In input mode, supported key events are translated to tmux key names and sent only to the selected pane.
 
-  UI->>API: send action or query
-  API->>CORE: forward command
-  TMUX-->>CORE: emit pane / process event
-  ADAPTER-->>CORE: emit agent event
-  CORE->>CORE: fold event into state
-  CORE-->>API: publish semantic update
-  API-->>UI: push SSE update
-  CORE->>CORE: reconcile from authoritative sources
-  CORE-->>UI: publish corrected state
-```
+### Pane switching
 
-## Shipped Daemon API
+When the dashboard starts inside tmux, it installs a temporary prefix-table binding for `A` targeting the dashboard pane. `Enter`/`o` calls `tmux switch-client` for the selected agent pane. The process remains alive in its original pane, and prefix + `A` switches the client back. The binding is removed when the dashboard exits.
 
-- `GET /health` returns plain text with the current revision.
-- `GET /state` returns the shared privacy-safe TSV projection, prefixed by `agentmux state`, `revision: <u64>`, and `agents: <N>`.
-- `GET /events` returns `text/event-stream`, sends the current snapshot immediately, then sends snapshot events for later revision changes.
-- `POST /evidence` accepts newline-delimited structured evidence up to 4096 bytes. It never stores or echoes raw payloads in state rows or parse errors.
-- The daemon rejects non-loopback bind addresses.
+### Daemon
 
-## Dependency Direction
+The optional daemon listens on `127.0.0.1:47631` by default and rejects non-loopback addresses. It polls fallback discovery, stores normalized state in memory, and exposes:
 
-- The shipped dashboard may use daemon API rows or the existing in-process discovery fallback.
-- Future richer Ratatui clients should depend on the daemon API only.
-- Current Ratatui rendering consumes only shared projection rows owned by the app model.
-- Tmux and procfs interaction stays inside the discovery layer or the one-shot inspect command.
-- Adapter and persistence code also stay below the API boundary.
+- `GET /health` — health and current revision
+- `GET /state` — current privacy-safe TSV projection
+- `GET /events` — server-sent snapshot events
+- `POST /evidence` — structured waiting-state evidence, limited to 4096 bytes
 
-## Authoritative Adapter / Source Precedence
+The dashboard prefers daemon state. If no daemon is reachable, it can start a child daemon; if daemon startup or communication fails, it uses the same discovery service in process.
 
-The shipped precedence is conservative: tmux and Linux procfs evidence produce fallback state and low-confidence basename candidates only. They do not prove exact agent identity and they do not infer waiting states.
+## Evidence precedence
 
-Structured daemon evidence can overlay waiting states for existing non-exited fallback agents. When evidence conflicts, the daemon resolves authoritative state in this exact order:
+Structured evidence may overlay waiting states on a live fallback row. Sources are ranked:
 
-1. Hook evidence.
-2. Marker evidence.
-3. Structured-log evidence.
-4. Process tree and tmux pane fallback evidence.
+1. Hook
+2. Marker
+3. Structured log
+4. tmux/process fallback
 
-Within one authoritative source, higher sequence wins. `clear` removes the active waiting override for that source precedence position. Exited or missing fallback panes win over waiting evidence. Terminal content patterns remain unimplemented.
+Higher sequence numbers win within a source. A `clear` event removes that source's override. Missing or exited pane evidence always wins over a waiting overlay.
 
-## Update Model
+## Failure boundaries
 
-- Shipped: synchronous dashboard refresh with daemon-first `/state`, in-process fallback, one-second automatic refresh, manual `r` / `R` refresh, and last-good-row retention on refresh failure.
-- Shipped: structured evidence updates increment the daemon revision and publish snapshots over SSE.
-- Shipped: in-memory reconciliation overlays authoritative waiting states onto fallback discovery snapshots.
-- Future: adaptive capture-pane only increases collection when activity, unread output, or a transition requires it.
+- Malformed tmux output fails safely without exposing raw private values.
+- Procfs denial, process exit races, and incomplete process trees degrade the affected evidence to unknown.
+- A pane capture error affects terminal-state refinement and preview content, not discovery of the row.
+- Invalid daemon responses trigger in-process fallback.
+- Dashboard refresh errors retain the last successful projection.
 
-## Input Handling
+## Current platform boundaries
 
-- Safe bracketed paste stays enabled for text input paths.
-- Key forwarding is explicit and scoped so the daemon does not leak raw terminal state.
-- Docked sidebar resize changes width only and does not move panes.
-
-## Search and Persistence
-
-- Search is backed by persisted indexed state, not by live UI scanning.
-- Persistence stores the minimum state needed for fast startup and recovery.
-- Search results and persisted state remain daemon-owned.
-
-## Git / PR Provider
-
-- Git and PR lookup is bounded, cached, and time-limited.
-- The provider only keeps a fixed working set and expires stale entries.
-- UI callers see the cached view through the daemon API.
-
-## Runtime and Flow Control
-
-- Tokio cancellation tokens stop stale work quickly.
-- Bounded channels limit fan-out and prevent unbounded queue growth.
-- Backpressure is explicit at the API and collector boundaries.
-- Timeouts cap slow collectors, searches, and Git / PR lookups.
-
-## Security and Privacy
-
-- Shipped daemon transport is loopback-only and rejects non-loopback bind addresses.
-- Sensitive prompts, secrets, full private diffs, procfs cmdlines, environments, terminal content, and full workspace paths stay out of presentation rows.
-- The UI renders only the shared projection data needed for the active view.
-- Evidence parse errors are sanitized and do not echo raw payloads.
-- Future authenticated loopback transport can add stronger local-client controls.
-
-## Degraded Failure Modes
-
-- Shipped: if dashboard refresh fails, the UI retains last good rows and shows a sanitized degraded banner.
-- Shipped: if per-pane procfs evidence is unavailable, denied, malformed, or racing process exit, that pane can remain visible with unknown/degraded evidence while other panes continue.
-- Shipped: if the daemon is unavailable or returns invalid state, the dashboard falls back to in-process discovery.
-- Future: if SSE drops in richer clients, the UI falls back to the last known state and reconnects.
-- Future: if a collector stalls, the daemon marks the source stale and continues with the rest of the graph.
-- Future: if persistence is missing or stale, the daemon rebuilds state from live collectors.
-
-## Future Only
-
-All of the following remain planned architecture and are not implemented yet:
-
-- Multi-client Ratatui dashboards.
-- Authenticated loopback transport beyond the shipped std-only local subset.
-- Durable daemon state and persistence beyond the shipped in-memory reducer.
-- Authoritative agent adapters and collectors beyond shipped structured evidence ingestion and tmux/procfs fallback evidence.
-- Tmux interaction beyond the current read-only `list-panes` tracer.
-- Process-tree discovery beyond shipped Linux procfs basename candidate evidence.
-- Cross-platform process discovery equivalent to Linux procfs.
-- Terminal-content adapters.
-- Adaptive capture-pane.
-- Safe bracketed paste and scoped key forwarding.
-- Docked sidebar resize without pane movement.
-- Search persistence.
-- Bounded cached Git / PR provider.
-- Tokio cancellation, backpressure, bounded channels, and timeouts.
-- Security and privacy controls beyond the foundation shell.
-- Degraded failure handling beyond the foundation shell.
+The production collector is Linux-specific because it relies on procfs. The daemon is local and in-memory; it is not a remote coordination service or durable database. Client status parsing intentionally remains conservative because terminal layouts can change between client versions.

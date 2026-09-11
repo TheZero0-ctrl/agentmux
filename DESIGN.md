@@ -1,162 +1,76 @@
-# agentmux Design System
+# Design system
 
-## 1. Atmosphere & Identity
+agentmux is a quiet terminal command center: compact enough to scan quickly and stable enough to leave open all day. The interface prioritizes the selected agent's real terminal surface while keeping navigation and state visible.
 
-agentmux should feel like a quiet terminal command center for local coding-agent work: dense enough to be useful, calm enough to stay open all day. The signature is a compact session picker: a privacy-safe agent sidebar, a responsive live preview, and a footer that always tells the operator what can be done now.
+## Layout
 
-## 2. Color
+The screen has three persistent regions:
 
-### Palette
+1. A compact header with product name, discovery summary, and degraded/input status.
+2. A main region containing the project-grouped sidebar and one selected-agent preview.
+3. A one-line, width-aware keyboard footer.
 
-| Role | Token | Terminal color | Usage |
-|------|-------|----------------|-------|
-| Surface/base | `base` | default background | Main terminal background |
-| Surface/panel | `panel` | black | Header, list, and detail panel blocks |
-| Text/primary | `text` | white | Primary labels and selected content |
-| Text/secondary | `subtext` | gray | Hints, metadata, and footer text |
-| Border/default | `border` | dark gray | Panel borders and separators |
-| Accent/active | `active` | cyan | Active row marker and focused shell title |
-| Status/working | `working` | yellow | Active work state |
-| Status/idle | `idle` | green | Calm idle state |
-| Status/unknown | `unknown` | dark gray | Unknown or unavailable state |
-| Status/degraded | `degraded` | red | Refresh degradation and warning status |
+The sidebar is 28 columns in ordinary terminals and 22 columns below 80 columns. It may be toggled, but selecting an agent never hides it automatically. The preview always consumes all remaining main-region space. Header height and footer copy become more compact on narrow terminals.
 
-### Rules
+## Sidebar
 
-- Use semantic terminal colors only; do not add new dependencies or RGB-only styling for this branch.
-- Color must reinforce status, not carry information by itself. Text labels remain explicit.
-- Raw tmux names, argv, full paths, credentials, and command stderr never appear in the UI. Visible local tiles may show bounded text captured from their selected tmux pane.
+- Project headings use the sanitized workspace label and a subdued style.
+- Agents appear in the same order used by keyboard navigation.
+- `>` marks the selected row.
+- Every row names the client and state; color reinforces but never replaces the state label.
+- Selection crosses project boundaries without requiring a separate group action.
 
-## 3. Typography
+## Preview
 
-### Scale
+- Exactly one agent pane is previewed at a time.
+- The preview title contains the client and indicates selection or input focus.
+- ANSI terminal styling is retained where safe.
+- Plain content wraps at the available width.
+- Terminal captures retain their native row layout and scroll to the newest visible content.
+- Missing content has an explicit fallback instead of leaving an unexplained blank panel.
 
-| Level | Style | Usage |
-|-------|-------|-------|
-| Title | bold | `agentmux` shell title |
-| Label | bold or dim | Panel titles and field labels |
-| Body | normal | Row content and detail values |
-| Metadata | dim | Evidence, hints, and privacy notes |
+## Input and pane switching
 
-### Font Stack
+Browsing mode is the default. `Tab`/`i` enters focused input mode and adds a visible banner, border treatment, and footer message. In this mode, keys go to the selected tmux pane; `Esc` returns to browsing.
 
-- Primary: terminal default monospace.
-- Mono: terminal default monospace.
+`Enter`/`o` switches the current tmux client to the selected pane while agentmux remains alive. Tmux prefix + `A` returns to the dashboard pane.
 
-### Rules
+## Color and emphasis
 
-- Assume a monospace terminal; align with layout constraints rather than proportional typography.
-- Keep row labels short and scannable.
-- Do not use emoji glyphs as icons or status indicators.
+Use terminal-native colors so the UI respects the user's environment.
 
-## 4. Spacing & Layout
+| Role | Treatment |
+| --- | --- |
+| Product/selection | Cyan and bold |
+| Working | Yellow |
+| Idle | Green |
+| Waiting | Magenta or warning emphasis |
+| Unknown/muted | Dark gray |
+| Degraded/error | Red |
+| Panel border | Dark gray; cyan when focused |
 
-### Base Unit
+No meaning may depend on color alone. Avoid emoji and RGB-only decoration.
 
-Terminal spacing is measured in cells. One cell is the base unit.
+## Spacing and typography
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `gap-1` | 1 cell | Cell separation and footer hint separators |
-| `pad-x` | 1 cell | Panel inner horizontal padding |
-| `row-main` | 1 line | Compact row summary |
-| `row-detail` | 1 line | Optional metadata row |
+- Assume a monospace terminal and measure layout in cells.
+- Use one-cell horizontal padding where content needs separation from borders.
+- Keep labels short and sentence case consistent.
+- Prefer one-line controls and headings over decorative whitespace.
+- Never let footer hints or metadata displace the live preview unnecessarily.
 
-### Grid
+## Responsive behavior
 
-- Wide: `>= 137` columns, header/status + list/detail split + footer.
-- Medium: `80..136` columns, header/status + single list + footer.
-- Narrow: `< 80` columns, header/status + compact list + short footer.
+- Recompute layout from the terminal area on every draw.
+- Keep the sidebar narrow and give all remaining width to the preview.
+- Reduce header and footer detail before sacrificing the preview.
+- Avoid multi-agent grids in constrained space; focus remains on one full-area pane.
+- Preserve access to the selected agent's current composer/status region by keeping the newest captured content.
 
-### Rules
+## Accessibility and privacy
 
-- The renderer derives layout from `frame.area()` every draw.
-- Wide mode may show a right-side detail panel for the selected row only.
-- Medium and narrow modes never show the wide detail panel.
-- Footer hints are width-aware and drop lower-priority text instead of overflowing.
-
-## 5. Components
-
-### Shell
-
-- **Structure**: header/status zone, main zone, footer zone.
-- **Variants**: wide, medium, narrow.
-- **Spacing**: `gap-1`, `pad-x`.
-- **States**: normal, empty, degraded.
-- **Accessibility**: every colored state has visible text.
-- **Motion**: none.
-
-### Agent List
-
-- **Structure**: one or two lines per row, with `>` marking the selected/detail row.
-- **Variants**: wide list, medium list, narrow compact list.
-- **Spacing**: `row-main`, optional `row-detail`.
-- **States**: working, idle, unknown, degraded evidence.
-- **Accessibility**: row text includes client, state, safe location, and process/workspace where width allows.
-- **Motion**: none.
-
-### Detail Panel
-
-- **Structure**: field/value lines for the selected row in wide mode.
-- **Variants**: present only in wide mode with at least one row.
-- **Spacing**: `pad-x`, `gap-1`.
-- **States**: normal and degraded banner inherited from Shell.
-- **Accessibility**: labels are textual and privacy-safe.
-- **Motion**: none.
-
-### Empty State
-
-- **Structure**: calm message plus refresh hint and privacy note.
-- **Variants**: normal empty and degraded empty.
-- **Spacing**: `gap-1`.
-- **States**: empty, degraded.
-- **Accessibility**: no hidden color-only meaning.
-- **Motion**: none.
-
-### Help Overlay
-
-- **Structure**: centered keyboard reference over the current dashboard.
-- **Variants**: same overlay in wide, medium, and narrow terminals.
-- **Spacing**: bounded centered panel.
-- **States**: visible when help is toggled by `?` or `h`.
-- **Accessibility**: keyboard bindings are written as text.
-- **Motion**: none.
-
-## 6. Motion & Interaction
-
-### Timing
-
-No animation is used in this terminal branch.
-
-### Rules
-
-- Existing controls remain: `q`, Esc, Ctrl-C quit; `r` and `R` refresh.
-- Selection controls are read-only: `j` / Down select next, `k` / Up select previous, Home/End jump, and PageUp/PageDown move by a page-sized step.
-- Pane navigation uses `Enter` / `o` to switch the tmux client to the selected agent's real pane.
-- Preview focus uses `Tab` / `i` to forward keys to the selected agent; `s` toggles the sidebar.
-- Help controls are read-only: `?` and `h` toggle the keyboard overlay.
-- Do not add mutating actions, search, pinning, grouping, or previews.
-- The active row marker follows selection in this branch.
-
-## 7. Depth & Surface
-
-### Strategy
-
-Use borders plus tonal emphasis. Ratatui panels provide structure; semantic color and bold/dim modifiers provide depth.
-
-| Level | Treatment | Usage |
-|-------|-----------|-------|
-| Base | default background | Full terminal area |
-| Panel | bordered block | Main list and wide detail panel |
-| Active | cyan marker and bold text | Selected row/detail target |
-| Warning | red status text | Degraded refresh state |
-
-### Scope Exclusions
-
-- No non-loopback networking; the shipped daemon API is loopback-only.
-- No separate preview surface; pane text belongs inside the selected agent tile.
-- No mutating dashboard actions beyond explicit focused-pane input forwarding; `Enter` / `o` only switch the tmux client to an existing pane.
-- No search, pinning, grouping, Git/PR enrichment, or persistence.
-- No external dependencies.
-- No unsafe code.
-- No raw `session_name` or `window_name` rendering; safe location format is `unknown:<window_index> unknown` plus pane id when needed.
+- Focus and state have textual indicators.
+- All primary behavior is keyboard accessible.
+- Help lists the active key bindings.
+- Raw tmux session/window labels, argv, full paths, environments, and credentials do not appear in dashboard metadata.
+- Pane captures remain local. Content is shown only for the selected pane and is not retained in daemon state.
