@@ -25,7 +25,20 @@ Building from source also requires Rust 1.96 or newer.
 
 ## Installation
 
-Download the Linux x86_64 archive and checksum from the [latest GitHub release](https://github.com/TheZero0-ctrl/agentmux/releases/latest), extract it, and place `agentmux` somewhere on your `PATH`.
+On Linux x86_64, download and install the latest release to `~/.local/bin` with:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/TheZero0-ctrl/agentmux/main/install.sh | sh
+```
+
+Make sure `~/.local/bin` is on your `PATH`. The installer verifies the release archive against its published SHA-256 checksum. To install a specific release or choose another directory:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/TheZero0-ctrl/agentmux/main/install.sh | sh -s -- v0.1.0
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/TheZero0-ctrl/agentmux/main/install.sh | sudo env AGENTMUX_INSTALL_DIR=/usr/local/bin sh
+```
+
+Release archives and checksums are also available from the [GitHub releases page](https://github.com/TheZero0-ctrl/agentmux/releases/latest).
 
 To build from source:
 

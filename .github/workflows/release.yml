@@ -35,7 +35,7 @@ jobs:
           mkdir -p dist
           archive="agentmux-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz"
           tar -C target/release -czf "dist/${archive}" agentmux
-          sha256sum "dist/${archive}" > "dist/${archive}.sha256"
+          (cd dist && sha256sum "${archive}" > "${archive}.sha256")
 
       - name: Create GitHub release
         env:
